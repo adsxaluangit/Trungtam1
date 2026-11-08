@@ -1,0 +1,91 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: trungtam1_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trungtam
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123456"
+    volumes:
+      - trungtam1_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5438:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trungtam"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Strapi Backend ──────────────────────────────────────────
+  strapi:
+    image: trungtam1-strapi:latest
+    build:
+      context: ./edumaster-main/edumaster-backend
+      dockerfile: Dockerfile
+    container_name: trungtam1_strapi
+    restart: unless-stopped
+    env_file: ./edumaster-main/edumaster-backend/.env
+    environment:
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: trungtam
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: "123456"
+      APP_KEYS: "toBeModified1,toBeModified2"
+      API_TOKEN_SALT: "toBeModified3"
+      ADMIN_JWT_SECRET: "toBeModified4"
+      TRANSFER_TOKEN_SALT: "toBeModified5"
+      JWT_SECRET: "toBeModified6"
+      NODE_ENV: production
+    volumes:
+      - ./uploads:/opt/app/public/uploads
+      - ./backups:/opt/app/database
+    ports:
+      - "1341:1337"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── React Frontend + Nginx SSL Proxy ────────────────────────
+  web:
+    image: trungtam1-web:latest
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: trungtam1_web
+    restart: unless-stopped
+    ports:
+      - "85:443"
+    volumes:
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - strapi
+
+  # ── Auto Daily Database Backup (FIFO) ───────────────────────
+  backup:
+    image: postgres:17-alpine
+    container_name: trungtam1_backup
+    restart: unless-stopped
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: trungtam
+      DATABASE_USERNAME: postgres
+      PGPASSWORD: "123456"
+      KEEP_DAYS: "7"
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./scripts/entrypoint-backup.sh:/entrypoint-backup.sh:ro
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "/entrypoint-backup.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  trungtam1_pgdata:
+    name: trungtam1_pgdata

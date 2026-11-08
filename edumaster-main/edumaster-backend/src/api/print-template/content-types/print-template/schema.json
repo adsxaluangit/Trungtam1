@@ -1,0 +1,27 @@
+{
+    "kind": "collectionType",
+    "collectionName": "print_templates",
+    "info": {
+        "singularName": "print-template",
+        "pluralName": "print-templates",
+        "displayName": "Mẫu in ấn",
+        "description": "Stores print templates for decisions and certificates"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "type": {
+            "type": "string",
+            "unique": true,
+            "required": true
+        },
+        "name": {
+            "type": "string"
+        },
+        "content": {
+            "type": "json"
+        }
+    }
+}

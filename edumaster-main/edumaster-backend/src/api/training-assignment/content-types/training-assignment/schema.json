@@ -1,0 +1,24 @@
+{
+    "kind": "collectionType",
+    "collectionName": "training_assignments",
+    "info": {
+        "singularName": "training-assignment",
+        "pluralName": "training-assignments",
+        "displayName": "Phân công giảng dạy",
+        "description": "Stores the training schedule for a class decision"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "decision": {
+            "type": "relation",
+            "relation": "oneToOne",
+            "target": "api::class-decision.class-decision"
+        },
+        "schedule": {
+            "type": "json"
+        }
+    }
+}

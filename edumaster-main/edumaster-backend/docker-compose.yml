@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: edumaster_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-123456}
+      POSTGRES_DB: ${DATABASE_NAME:-edumaster}
+    ports:
+      - "5432:5432"
+    volumes:
+      - edumaster_db_data:/var/lib/postgresql/data
+      - ./edumaster-backend/database/21032026_v3.sql:/dump.backup:ro
+      - ./edumaster-backend/database/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    networks:
+      - edumaster_net
+
+  backend:
+    build:
+      context: ./edumaster-backend
+      dockerfile: Dockerfile
+    container_name: edumaster_backend
+    restart: always
+    environment:
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-edumaster}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-123456}
+      DATABASE_SSL: "false"
+      DATABASE_POOL_MIN: 5
+      DATABASE_POOL_MAX: 20
+      APP_KEYS: "toBeModified1,toBeModified2"
+      API_TOKEN_SALT: "toBeModified3"
+      ADMIN_JWT_SECRET: "toBeModified4"
+      TRANSFER_TOKEN_SALT: "toBeModified5"
+      JWT_SECRET: "toBeModified6"
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 1337
+    ports:
+      - "1337:1337"
+    depends_on:
+      - db
+    networks:
+      - edumaster_net
+    volumes:
+      - ./edumaster-backend/public/uploads:/opt/app/public/uploads
+
+  frontend:
+    build:
+      context: ./edumaster-frontend
+      dockerfile: Dockerfile
+    container_name: edumaster_frontend
+    restart: always
+    ports:
+      - "81:80"     # Giu port 81 den khi cai xong HTTPS
+    depends_on:
+      - backend
+    networks:
+      - edumaster_net
+
+  # ============================================
+  # Nginx Reverse Proxy - xu ly HTTPS port 443
+  # Port 80 KHONG dung (da co service khac)
+  # ============================================
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: edumaster_proxy
+    restart: always
+    ports:
+      - "443:443"     # Chi HTTPS, khong bind port 80
+    volumes:
+      - ./nginx-proxy/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - edumaster_net
+
+  # ============================================
+  # Certbot - quan ly chung chi SSL
+  # Su dung DNS Challenge (khong can port 80)
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    container_name: edumaster_certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+    # Tu dong renew moi 12 gio (dung DNS challenge)
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet --preferred-challenges dns; sleep 12h & wait $${!}; done"
+
+volumes:
+  edumaster_db_data:
+  certbot_conf:
+
+networks:
+  edumaster_net:
+    driver: bridge

@@ -1,0 +1,29 @@
+{
+    "kind": "collectionType",
+    "collectionName": "nations",
+    "info": {
+        "singularName": "nation",
+        "pluralName": "nations",
+        "displayName": "Quốc tịch",
+        "description": "Nations table"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "code": {
+            "type": "string",
+            "unique": true
+        },
+        "name": {
+            "type": "string"
+        },
+        "abbr": {
+            "type": "string"
+        },
+        "status": {
+            "type": "string"
+        }
+    }
+}

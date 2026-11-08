@@ -1,0 +1,44 @@
+# Dependencies & Build Outputs
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+.tmp/
+**/.tmp/
+.strapi/
+**/.strapi/
+
+# Environment & Secrets
+.env
+*.env
+!**/.env.example
+
+# Database Dumps & Backups
+*.sql
+*.sql.gz
+*.dump
+backups/*
+!backups/.gitkeep
+edumaster-main/edumaster-backend/database/*
+
+# Uploaded Student Photos & Documents
+uploads/*
+!uploads/.gitkeep
+edumaster-main/edumaster-backend/public/uploads/*
+!edumaster-main/edumaster-backend/public/uploads/.gitkeep
+
+# SSL Private Keys & Certificates
+ssl/*.pem
+ssl/*.key
+ssl/*.crt
+apps/web/ssl/*.pem
+apps/web/ssl/*.key
+apps/web/ssl/*.crt
+
+# IDE, Logs & Temporary Folders
+.vscode/
+.idea/
+*.log
+skills-main/

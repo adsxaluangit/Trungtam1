@@ -1,0 +1,94 @@
+{
+    "kind": "collectionType",
+    "collectionName": "students",
+    "info": {
+        "singularName": "student",
+        "pluralName": "students",
+        "displayName": "Học viên",
+        "description": "Students table"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "stt": {
+            "type": "integer"
+        },
+        "group": {
+            "type": "string"
+        },
+        "class_code": {
+            "type": "string"
+        },
+        "class_name": {
+            "type": "string"
+        },
+        "card_number": {
+            "type": "string"
+        },
+        "student_code": {
+            "type": "string"
+        },
+        "id_number": {
+            "type": "string"
+        },
+        "first_name": {
+            "type": "string"
+        },
+        "last_name": {
+            "type": "string"
+        },
+        "full_name": {
+            "type": "string"
+        },
+        "gender": {
+            "type": "string"
+        },
+        "dob": {
+            "type": "string"
+        },
+        "pob": {
+            "type": "string"
+        },
+        "ethnicity": {
+            "type": "string"
+        },
+        "nationality": {
+            "type": "string"
+        },
+        "company": {
+            "type": "string"
+        },
+        "address": {
+            "type": "text"
+        },
+        "score": {
+            "type": "string"
+        },
+        "photo": {
+            "type": "text"
+        },
+        "phone": {
+            "type": "string"
+        },
+        "school_class": {
+            "type": "relation",
+            "relation": "manyToOne",
+            "target": "api::school-class.school-class"
+        },
+        "documents": {
+            "type": "relation",
+            "relation": "oneToMany",
+            "target": "api::student-document.student-document",
+            "mappedBy": "student"
+        },
+        "notes": {
+            "type": "text"
+        },
+        "is_approved": {
+            "type": "boolean",
+            "default": false
+        }
+    }
+}

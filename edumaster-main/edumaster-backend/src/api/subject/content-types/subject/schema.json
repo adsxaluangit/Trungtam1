@@ -1,0 +1,52 @@
+{
+    "kind": "collectionType",
+    "collectionName": "subjects",
+    "info": {
+        "singularName": "subject",
+        "pluralName": "subjects",
+        "displayName": "Môn học",
+        "description": "Subjects table"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "code": {
+            "type": "string",
+            "unique": true
+        },
+        "name": {
+            "type": "string"
+        },
+        "sessions": {
+            "type": "integer"
+        },
+        "total_hours": {
+            "type": "decimal"
+        },
+        "theory_hours": {
+            "type": "decimal"
+        },
+        "practice_hours": {
+            "type": "decimal"
+        },
+        "exercise_hours": {
+            "type": "decimal"
+        },
+        "exam_hours": {
+            "type": "decimal"
+        },
+        "notes": {
+            "type": "text"
+        },
+        "has_theory": {
+            "type": "boolean",
+            "default": true
+        },
+        "has_practice": {
+            "type": "boolean",
+            "default": false
+        }
+    }
+}

@@ -1,0 +1,29 @@
+{
+    "kind": "collectionType",
+    "collectionName": "teacher_subjects",
+    "info": {
+        "singularName": "teacher-subject",
+        "pluralName": "teacher-subjects",
+        "displayName": "Giảng viên - Môn học (Legacy)",
+        "description": "Mapping từ bảng teacher_subjects"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {
+        "content-manager": {
+            "visible": false
+        },
+        "content-type-builder": {
+            "visible": false
+        }
+    },
+    "attributes": {
+        "teacher_id": {
+            "type": "string"
+        },
+        "subject_id": {
+            "type": "string"
+        }
+    }
+}

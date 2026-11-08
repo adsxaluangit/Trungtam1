@@ -1,0 +1,24 @@
+{
+    "kind": "collectionType",
+    "collectionName": "exam_grades",
+    "info": {
+        "singularName": "exam-grade",
+        "pluralName": "exam-grades",
+        "displayName": "Điểm thi",
+        "description": "Stores exam grades for a class decision"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "decision": {
+            "type": "relation",
+            "relation": "oneToOne",
+            "target": "api::class-decision.class-decision"
+        },
+        "grades": {
+            "type": "json"
+        }
+    }
+}

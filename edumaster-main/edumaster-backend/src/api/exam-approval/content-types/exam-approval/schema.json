@@ -1,0 +1,24 @@
+{
+    "kind": "collectionType",
+    "collectionName": "exam_approvals",
+    "info": {
+        "singularName": "exam-approval",
+        "pluralName": "exam-approvals",
+        "displayName": "Duyệt thi",
+        "description": "Stores exam approval status for students in a class decision"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "decision": {
+            "type": "relation",
+            "relation": "oneToOne",
+            "target": "api::class-decision.class-decision"
+        },
+        "approvals": {
+            "type": "json"
+        }
+    }
+}

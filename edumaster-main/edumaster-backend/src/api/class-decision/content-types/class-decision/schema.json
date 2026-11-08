@@ -1,0 +1,71 @@
+{
+    "kind": "collectionType",
+    "collectionName": "class_decisions",
+    "info": {
+        "singularName": "class-decision",
+        "pluralName": "class-decisions",
+        "displayName": "Quyết định",
+        "description": "Decision to open a class or recognize completion"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "decision_number": {
+            "type": "string",
+            "required": true
+        },
+        "type": {
+            "type": "enumeration",
+            "enum": [
+                "OPENING",
+                "RECOGNITION"
+            ],
+            "default": "OPENING"
+        },
+        "training_course": {
+            "type": "string"
+        },
+        "signed_date": {
+            "type": "date"
+        },
+        "signer_name": {
+            "type": "string"
+        },
+        "school_class": {
+            "type": "relation",
+            "relation": "manyToOne",
+            "target": "api::school-class.school-class"
+        },
+        "students": {
+            "type": "relation",
+            "relation": "manyToMany",
+            "target": "api::student.student",
+            "onDelete": "CASCADE"
+        },
+        "notes": {
+            "type": "text"
+        },
+        "related_decision": {
+            "type": "relation",
+            "relation": "oneToOne",
+            "target": "api::class-decision.class-decision"
+        },
+        "start_date": {
+            "type": "date"
+        },
+        "end_date": {
+            "type": "date"
+        },
+        "location": {
+            "type": "string"
+        },
+        "company": {
+            "type": "string"
+        },
+        "class_type": {
+            "type": "string"
+        }
+    }
+}

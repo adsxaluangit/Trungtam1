@@ -1,0 +1,32 @@
+{
+    "kind": "collectionType",
+    "collectionName": "classrooms",
+    "info": {
+        "singularName": "classroom",
+        "pluralName": "classrooms",
+        "displayName": "Phòng học",
+        "description": "Classrooms table"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "code": {
+            "type": "string",
+            "unique": true
+        },
+        "name": {
+            "type": "string"
+        },
+        "capacity": {
+            "type": "integer"
+        },
+        "building": {
+            "type": "string"
+        },
+        "status": {
+            "type": "string"
+        }
+    }
+}

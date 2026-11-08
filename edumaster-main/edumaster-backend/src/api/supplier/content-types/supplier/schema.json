@@ -1,0 +1,38 @@
+{
+    "kind": "collectionType",
+    "collectionName": "suppliers",
+    "info": {
+        "singularName": "supplier",
+        "pluralName": "suppliers",
+        "displayName": "Dãy nhà",
+        "description": "Suppliers table"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "code": {
+            "type": "string",
+            "unique": true
+        },
+        "name": {
+            "type": "string"
+        },
+        "tax_id": {
+            "type": "string"
+        },
+        "phone": {
+            "type": "string"
+        },
+        "email": {
+            "type": "string"
+        },
+        "address": {
+            "type": "text"
+        },
+        "status": {
+            "type": "string"
+        }
+    }
+}

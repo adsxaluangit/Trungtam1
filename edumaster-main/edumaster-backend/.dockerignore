@@ -1,0 +1,10 @@
+node_modules
+.env
+.git
+.strapi-updater.json
+backend.rar
+build
+dist
+.cache
+.tmp
+public/uploads

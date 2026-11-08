@@ -1,0 +1,29 @@
+{
+    "kind": "collectionType",
+    "collectionName": "audit_logs",
+    "info": {
+        "singularName": "audit-log",
+        "pluralName": "audit-logs",
+        "displayName": "Lịch sử hệ thống",
+        "description": "System activity logs"
+    },
+    "options": {
+        "draftAndPublish": false
+    },
+    "pluginOptions": {},
+    "attributes": {
+        "action": {
+            "type": "string",
+            "required": true
+        },
+        "actor": {
+            "type": "string"
+        },
+        "details": {
+            "type": "text"
+        },
+        "entity_id": {
+            "type": "string"
+        }
+    }
+}

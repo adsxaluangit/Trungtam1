@@ -1,0 +1,34 @@
+{
+    "name": "edumaster-pro-backend",
+    "private": true,
+    "version": "1.0.0",
+    "description": "Strapi backend for EduMaster Pro",
+    "scripts": {
+        "develop": "strapi develop",
+        "start": "strapi start",
+        "build": "strapi build",
+        "strapi": "strapi"
+    },
+    "dependencies": {
+        "@google/genai": "^1.37.0",
+        "@strapi/plugin-cloud": "^5.35.0",
+        "@strapi/plugin-users-permissions": "^5.35.0",
+        "@strapi/strapi": "^5.35.0",
+        "bcryptjs": "^2.4.3",
+        "pg": "^8.16.3",
+        "react": "18.0.0",
+        "react-dom": "18.0.0",
+        "react-router-dom": "^6.0.0",
+        "styled-components": "^6.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0 <=24.x.x",
+        "npm": ">=6.0.0"
+    },
+    "devDependencies": {
+        "@types/bcryptjs": "^2.4.6"
+    },
+    "strapi": {
+        "uuid": "edumaster-pro-backend"
+    }
+}
