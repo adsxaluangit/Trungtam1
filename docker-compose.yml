@@ -22,11 +22,11 @@ services:
   strapi:
     image: trungtam1-strapi:latest
     build:
-      context: ./edumaster-main/edumaster-backend
+      context: ./apps/backend
       dockerfile: Dockerfile
     container_name: trungtam1_strapi
     restart: unless-stopped
-    env_file: ./edumaster-main/edumaster-backend/.env
+    env_file: ./apps/backend/.env
     environment:
       DATABASE_CLIENT: postgres
       DATABASE_HOST: postgres

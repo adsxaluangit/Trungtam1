@@ -21,13 +21,13 @@ build/
 *.dump
 backups/*
 !backups/.gitkeep
-edumaster-main/edumaster-backend/database/*
+apps/backend/database/*
 
 # Uploaded Student Photos & Documents
 uploads/*
 !uploads/.gitkeep
-edumaster-main/edumaster-backend/public/uploads/*
-!edumaster-main/edumaster-backend/public/uploads/.gitkeep
+apps/backend/public/uploads/*
+!apps/backend/public/uploads/.gitkeep
 
 # SSL Private Keys & Certificates
 ssl/*.pem
