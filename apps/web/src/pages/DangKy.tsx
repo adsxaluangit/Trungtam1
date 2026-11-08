@@ -422,45 +422,15 @@ export default function DangKy() {
               nationality: 'Việt Nam',
             }}
           >
-            {/* 1. Chọn lớp học */}
+            {/* 1. Thông tin cá nhân */}
             <Title level={5} style={{ color: '#1677ff', borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
-              1. Lớp học đăng ký
-            </Title>
-            <Form.Item
-              name="classIds"
-              label="Chọn lớp học (Có thể chọn nhiều lớp)"
-              rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 lớp học!' }]}
-            >
-              <Select
-                mode="multiple"
-                placeholder="Tìm kiếm và chọn lớp học..."
-                loading={dangTaiLop}
-                allowClear
-                options={danhSachLop?.map((c: any) => ({
-                  value: c.documentId || c.id,
-                  label: `${c.code ? `[${c.code}] ` : ''}${c.name}`,
-                }))}
-              />
-            </Form.Item>
-
-            {/* 2. Thông tin cá nhân */}
-            <Title level={5} style={{ color: '#1677ff', borderBottom: '1px solid #f0f0f0', paddingBottom: 8, marginTop: 24 }}>
-              2. Thông tin cá nhân
+              1. Thông tin cá nhân
             </Title>
             <Row gutter={16}>
               <Col xs={24} md={12}>
                 <Form.Item
-                  name="fullName"
-                  label="Họ và tên"
-                  rules={[{ required: true, message: 'Vui lòng nhập họ và tên' }]}
-                >
-                  <Input placeholder="VÍ DỤ: NGUYỄN VĂN AN" style={{ textTransform: 'uppercase' }} />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <Form.Item
                   name="idNumber"
-                  label="Số CCCD / CMND"
+                  label="Số CCCD / CMND:"
                   rules={[
                     { required: true, message: 'Vui lòng nhập số CCCD' },
                     { pattern: /^\d{12}$/, message: 'Số CCCD phải gồm đúng 12 chữ số' },
@@ -469,13 +439,22 @@ export default function DangKy() {
                   <Input placeholder="12 chữ số trên căn cước công dân" maxLength={12} onBlur={onCCCDBlur} />
                 </Form.Item>
               </Col>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name="fullName"
+                  label="Họ và tên:"
+                  rules={[{ required: true, message: 'Vui lòng nhập họ và tên' }]}
+                >
+                  <Input placeholder="VÍ DỤ: NGUYỄN VĂN AN" style={{ textTransform: 'uppercase' }} />
+                </Form.Item>
+              </Col>
             </Row>
 
             <Row gutter={16}>
               <Col xs={24} md={8}>
                 <Form.Item
                   name="dob"
-                  label="Ngày sinh"
+                  label="Ngày sinh:"
                   rules={[
                     { required: true, message: 'Vui lòng chọn ngày sinh' },
                     {
@@ -499,7 +478,7 @@ export default function DangKy() {
               <Col xs={24} md={8}>
                 <Form.Item
                   name="gender"
-                  label="Giới tính"
+                  label="Giới tính:"
                   rules={[{ required: true, message: 'Chọn giới tính' }]}
                 >
                   <Radio.Group>
@@ -511,7 +490,7 @@ export default function DangKy() {
               <Col xs={24} md={8}>
                 <Form.Item
                   name="pob"
-                  label="Nơi sinh (Tỉnh / Thành)"
+                  label="Nơi sinh (Tỉnh / Thành):"
                   rules={[{ required: true, message: 'Chọn nơi sinh' }]}
                 >
                   <Select
@@ -525,19 +504,19 @@ export default function DangKy() {
 
             <Row gutter={16}>
               <Col xs={24} md={8}>
-                <Form.Item name="ethnicity" label="Dân tộc">
+                <Form.Item name="ethnicity" label="Dân tộc:">
                   <Input placeholder="Kinh, Tày, Nùng..." />
                 </Form.Item>
               </Col>
               <Col xs={24} md={8}>
-                <Form.Item name="nationality" label="Quốc tịch">
+                <Form.Item name="nationality" label="Quốc tịch:">
                   <Input placeholder="Việt Nam" />
                 </Form.Item>
               </Col>
               <Col xs={24} md={8}>
                 <Form.Item
                   name="phone"
-                  label="Số điện thoại liên hệ"
+                  label="Số điện thoại liên hệ:"
                   rules={[{ required: true, message: 'Vui lòng nhập số điện thoại' }]}
                 >
                   <Input placeholder="09xxxxxxx" />
@@ -549,21 +528,42 @@ export default function DangKy() {
               <Col xs={24} md={12}>
                 <Form.Item
                   name="address"
-                  label="Địa chỉ thường trú"
+                  label="Địa chỉ thường trú:"
                   rules={[{ required: true, message: 'Vui lòng nhập địa chỉ thường trú' }]}
                 >
                   <Input placeholder="Số nhà, đường, xã/phường, quận/huyện, tỉnh/thành" />
                 </Form.Item>
               </Col>
               <Col xs={24} md={12}>
-                <Form.Item name="company" label="Cơ quan / Đơn vị công tác (Nếu có)">
+                <Form.Item name="company" label="Cơ quan / Đơn vị công tác (Nếu có):">
                   <Input placeholder="Tên công ty, cơ quan đang làm việc" />
                 </Form.Item>
               </Col>
             </Row>
 
-            <Form.Item name="notes" label="Ghi chú thêm">
+            <Form.Item name="notes" label="Ghi chú thêm:">
               <Input.TextArea rows={2} placeholder="Yêu cầu đặc biệt hoặc thông tin bổ sung..." />
+            </Form.Item>
+
+            {/* 2. Chọn lớp học */}
+            <Title level={5} style={{ color: '#1677ff', borderBottom: '1px solid #f0f0f0', paddingBottom: 8, marginTop: 24 }}>
+              2. Lớp học đăng ký
+            </Title>
+            <Form.Item
+              name="classIds"
+              label="Chọn lớp học (Có thể chọn nhiều lớp):"
+              rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 lớp học!' }]}
+            >
+              <Select
+                mode="multiple"
+                placeholder="Tìm kiếm và chọn lớp học..."
+                loading={dangTaiLop}
+                allowClear
+                options={danhSachLop?.map((c: any) => ({
+                  value: c.documentId || c.id,
+                  label: `${c.code ? `[${c.code}] ` : ''}${c.name}`,
+                }))}
+              />
             </Form.Item>
 
             {/* 3. Tải lên hình ảnh hồ sơ */}
