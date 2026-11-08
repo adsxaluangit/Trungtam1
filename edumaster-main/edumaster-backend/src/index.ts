@@ -88,6 +88,7 @@ export default {
                     'api::print-template.print-template.find', 'api::print-template.print-template.findOne', 'api::print-template.print-template.create', 'api::print-template.print-template.update', 'api::print-template.print-template.delete',
                     'api::audit-log.audit-log.find', 'api::audit-log.audit-log.findOne', 'api::audit-log.audit-log.create',
                     'plugin::users-permissions.user.me',
+                    'plugin::users-permissions.auth.changePassword',
                     'plugin::users-permissions.user.find', 'plugin::users-permissions.user.findOne', 'plugin::users-permissions.user.create', 'plugin::users-permissions.user.update', 'plugin::users-permissions.user.destroy', 'plugin::users-permissions.role.find'
                 ];
 
@@ -123,36 +124,27 @@ export default {
                     console.log(' EduMaster Public Role permissions (UPDATED)');
                 }
 
-                // 3. Update Users with correct HASHED passwords
-                // Strapi v5: hashPassword da bi xoa khoi user service, dung bcryptjs truc tiep
+                // 3. Create default users only if they do not exist (do not overwrite existing passwords)
                 const usersToSet = [
                     { username: 'duong', email: 'duong@edumaster.pro', password: 'EduMaster@2026' },
-                    { username: 'admin', email: 'admin@edumaster.pro', password: 'admin123' }
+                    { username: 'admin', email: 'admin@edumaster.pro', password: 'Admin498@' }
                 ];
 
                 for (const uData of usersToSet) {
                     const user = await strapi.query('plugin::users-permissions.user').findOne({ where: { username: uData.username } });
-                    const hashedPassword = await bcrypt.hash(uData.password, 10);
-                    
-                    const finalData = {
-                        username: uData.username,
-                        email: uData.email,
-                        password: hashedPassword,
-                        role: authenticatedRole.id,
-                        confirmed: true,
-                        blocked: false,
-                        provider: 'local'
-                    };
-
                     if (!user) {
+                        const hashedPassword = await bcrypt.hash(uData.password, 10);
+                        const finalData = {
+                            username: uData.username,
+                            email: uData.email,
+                            password: hashedPassword,
+                            role: authenticatedRole.id,
+                            confirmed: true,
+                            blocked: false,
+                            provider: 'local'
+                        };
                         await strapi.query('plugin::users-permissions.user').create({ data: finalData });
                         console.log(` EduMaster Created "${uData.username}"`);
-                    } else {
-                        await strapi.query('plugin::users-permissions.user').update({
-                            where: { id: user.id },
-                            data: finalData
-                        });
-                        console.log(` EduMaster Updated "${uData.username}"`);
                     }
                 }
 
