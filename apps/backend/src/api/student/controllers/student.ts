@@ -2,6 +2,8 @@
  * student controller
  */
 
+import fs from 'fs';
+import path from 'path';
 import { factories } from '@strapi/strapi'
 
 
@@ -9,9 +11,48 @@ export default factories.createCoreController('api::student.student', ({ strapi 
 
   async processPhoto(ctx) {
     try {
-      const { originalImage, gender } = ctx.request.body;
+      let { originalImage, gender } = ctx.request.body;
       if (!originalImage) {
         return ctx.badRequest("No image provided");
+      }
+
+      // Chuẩn hóa originalImage sang data:image/...;base64,... nếu là đường dẫn /uploads/... hoặc URL
+      if (typeof originalImage === 'string' && !originalImage.startsWith('data:')) {
+        let resolvedFromDisk = false;
+        const uploadsMatch = originalImage.match(/(\/uploads\/[^\s?#]+)/);
+        if (uploadsMatch) {
+          const relPath = decodeURIComponent(uploadsMatch[1]);
+          const publicDir = (strapi as any).dirs?.static?.public || path.join(process.cwd(), 'public');
+          const localFilePath = path.join(publicDir, relPath);
+          if (fs.existsSync(localFilePath)) {
+            const buffer = fs.readFileSync(localFilePath);
+            const ext = path.extname(localFilePath).toLowerCase();
+            const mimeMap: Record<string, string> = {
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.png': 'image/png',
+              '.webp': 'image/webp',
+              '.gif': 'image/gif',
+            };
+            const mimeType = mimeMap[ext] || 'image/jpeg';
+            originalImage = `data:${mimeType};base64,${buffer.toString('base64')}`;
+            resolvedFromDisk = true;
+          }
+        }
+
+        if (!resolvedFromDisk && (originalImage.startsWith('http://') || originalImage.startsWith('https://'))) {
+          const imgRes = await fetch(originalImage);
+          if (!imgRes.ok) {
+            return ctx.badRequest(`Không thể tải ảnh gốc từ URL (${imgRes.status})`);
+          }
+          const arrayBuf = await imgRes.arrayBuffer();
+          const mimeType = (imgRes.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+          originalImage = `data:${mimeType};base64,${Buffer.from(arrayBuf).toString('base64')}`;
+        }
+
+        if (!originalImage.startsWith('data:')) {
+          return ctx.badRequest(`Không tìm thấy file ảnh gốc trên máy chủ (${originalImage})`);
+        }
       }
 
       const knex = (strapi as any).db.connection;
