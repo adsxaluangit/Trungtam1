@@ -922,13 +922,28 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   };
 
   // ============================================================
-  // Tải ảnh 3x4 ZIP (expandable row)
+  // Tải ảnh 3x4 ZIP (expandable row & modal) - xếp theo vần A-Z
   // ============================================================
   const taiAnh3x4 = async (students: StudentDetail[], decisionNumber: string) => {
     const JSZip = (await import('jszip')).default;
     const { saveAs } = await import('file-saver');
     const zip = new JSZip();
-    const withPhoto = students.filter(s => s.photo);
+    const withPhoto = [...students]
+      .filter(s => s.photo)
+      .sort((a, b) => {
+        const getParts = (name: string) => {
+          const parts = (name || '').trim().split(/\s+/);
+          const first = parts.length > 1 ? parts.pop() || '' : parts[0] || '';
+          const last = parts.join(' ');
+          return { first: first.toLowerCase(), last: last.toLowerCase() };
+        };
+        const nameA = getParts(a.fullName || '');
+        const nameB = getParts(b.fullName || '');
+        return (
+          nameA.first.localeCompare(nameB.first, 'vi', { sensitivity: 'base' }) ||
+          nameA.last.localeCompare(nameB.last, 'vi', { sensitivity: 'base' })
+        );
+      });
     if (withPhoto.length === 0) {
       message.warning('Không có học viên nào có ảnh 3x4');
       return;

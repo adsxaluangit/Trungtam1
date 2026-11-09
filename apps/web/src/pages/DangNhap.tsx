@@ -67,7 +67,7 @@ export default function DangNhap() {
               />
             </div>
             <span style={{ color: '#0958d9', fontWeight: 700, fontSize: 13.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              PTNL – Trường CĐ Hàng hải và Đường thủy I
+              TRUNG TÂM – Trường CĐ Hàng hải và Đường thủy I
             </span>
           </div>
           <h2>Trung tâm Đào tạo Phát triển nguồn lực</h2>
@@ -92,13 +92,13 @@ export default function DangNhap() {
             >
               <img
                 src="/logo.png"
-                alt="Logo PTNL"
+                alt="Logo TRUNG TÂM"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             </div>
             <div>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1677ff', textTransform: 'uppercase', letterSpacing: 0.3, lineHeight: 1.35 }}>
-                PTNL – Trung tâm Đào tạo Phát triển nguồn lực
+                TRUNG TÂM – Trung tâm Đào tạo Phát triển nguồn lực
               </div>
               <h1 style={{ margin: '2px 0 0', fontSize: 22, color: '#0f1f3d' }}>Đăng nhập</h1>
             </div>

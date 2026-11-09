@@ -780,7 +780,22 @@ export default function HocVienList() {
     const selected = selectedRowKeys.length > 0
       ? list.filter((s: any) => selectedRowKeys.includes(s.documentId || s.id))
       : list;
-    const withPhoto = selected.filter((s: any) => s.photo);
+    const withPhoto = [...selected]
+      .filter((s: any) => s.photo)
+      .sort((a: any, b: any) => {
+        const getParts = (name: string) => {
+          const parts = (name || '').trim().split(/\s+/);
+          const first = parts.length > 1 ? parts.pop() || '' : parts[0] || '';
+          const last = parts.join(' ');
+          return { first: first.toLowerCase(), last: last.toLowerCase() };
+        };
+        const nameA = getParts(a.full_name || a.fullName || '');
+        const nameB = getParts(b.full_name || b.fullName || '');
+        return (
+          nameA.first.localeCompare(nameB.first, 'vi', { sensitivity: 'base' }) ||
+          nameA.last.localeCompare(nameB.last, 'vi', { sensitivity: 'base' })
+        );
+      });
     if (withPhoto.length === 0) {
       message.warning('Không có học viên nào (trong nhóm đã chọn) có ảnh 3x4.');
       return;

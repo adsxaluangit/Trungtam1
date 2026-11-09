@@ -64,6 +64,7 @@ export default function DuyetThi() {
   const [loading, setLoading] = useState(false);
   const [decisions, setDecisions] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>();
   const [searchDecisionText, setSearchDecisionText] = useState('');
 
   // Selected decision & detail view
@@ -688,13 +689,35 @@ export default function DuyetThi() {
     printWindow.document.close();
   };
 
-  // Filtered decisions list
-  const filteredDecisions = decisions.filter(
-    (d) =>
-      (d.decision_number || '').toLowerCase().includes(searchDecisionText.toLowerCase()) ||
-      (d.className || '').toLowerCase().includes(searchDecisionText.toLowerCase()) ||
-      (d.classCode || '').toLowerCase().includes(searchDecisionText.toLowerCase()),
+  const classFilterOptions = Array.from(
+    new Map(
+      decisions
+        .filter((d) => d.classId || d.className)
+        .map((d) => {
+          const key = String(d.classId || d.className);
+          return [
+            key,
+            {
+              value: key,
+              label: `${d.classCode ? `[${d.classCode}] ` : ''}${d.className}`,
+            },
+          ];
+        }),
+    ).values(),
   );
+
+  // Filtered decisions list
+  const filteredDecisions = decisions.filter((d) => {
+    const matchClass = !selectedClassFilter || String(d.classId || d.className) === String(selectedClassFilter);
+    const kw = searchDecisionText.trim().toLowerCase();
+    const matchText =
+      !kw ||
+      (d.decision_number || '').toLowerCase().includes(kw) ||
+      (d.className || '').toLowerCase().includes(kw) ||
+      (d.classCode || '').toLowerCase().includes(kw) ||
+      (d.trainingCourse || '').toLowerCase().includes(kw);
+    return matchClass && matchText;
+  });
 
   // Filtered students in detail view
   const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
@@ -735,14 +758,27 @@ export default function DuyetThi() {
               </Space>
             </Col>
             <Col>
-              <Input
-                placeholder="Tìm quyết định, mã lớp, tên lớp..."
-                prefix={<SearchOutlined />}
-                style={{ width: 280 }}
-                value={searchDecisionText}
-                onChange={(e) => setSearchDecisionText(e.target.value)}
-                allowClear
-              />
+              <Space wrap>
+                <Select
+                  placeholder="Lọc theo lớp học"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  popupMatchSelectWidth={false}
+                  style={{ width: 340, maxWidth: '100%' }}
+                  value={selectedClassFilter}
+                  onChange={(v) => setSelectedClassFilter(v)}
+                  options={classFilterOptions}
+                />
+                <Input
+                  placeholder="Tìm quyết định, mã lớp, tên lớp..."
+                  prefix={<SearchOutlined />}
+                  style={{ width: 260 }}
+                  value={searchDecisionText}
+                  onChange={(e) => setSearchDecisionText(e.target.value)}
+                  allowClear
+                />
+              </Space>
             </Col>
           </Row>
         </Card>

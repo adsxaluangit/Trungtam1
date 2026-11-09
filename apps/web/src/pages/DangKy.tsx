@@ -398,7 +398,7 @@ export default function DangKy() {
               >
                 <img
                   src="/logo.png"
-                  alt="Logo PTNL"
+                  alt="Logo TRUNG TÂM"
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 />
               </div>

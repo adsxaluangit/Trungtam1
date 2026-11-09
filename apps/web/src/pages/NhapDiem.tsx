@@ -59,6 +59,7 @@ export default function NhapDiem() {
   const [loading, setLoading] = useState(false);
   const [decisions, setDecisions] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>();
   const [searchTerm, setSearchTerm] = useState('');
 
   // Selected decision & modal/detail states
@@ -538,12 +539,34 @@ export default function NhapDiem() {
   const curSubGrades = inputGrades[subKey] || {};
   const curSubApprovals = approvals[subKey] || {};
 
-  const filteredDecisions = decisions.filter(
-    (d) =>
-      (d.decision_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (d.className || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (d.classCode || '').toLowerCase().includes(searchTerm.toLowerCase()),
+  const classFilterOptions = Array.from(
+    new Map(
+      decisions
+        .filter((d) => d.classId || d.className)
+        .map((d) => {
+          const key = String(d.classId || d.className);
+          return [
+            key,
+            {
+              value: key,
+              label: `${d.classCode ? `[${d.classCode}] ` : ''}${d.className}`,
+            },
+          ];
+        }),
+    ).values(),
   );
+
+  const filteredDecisions = decisions.filter((d) => {
+    const matchClass = !selectedClassFilter || String(d.classId || d.className) === String(selectedClassFilter);
+    const kw = searchTerm.trim().toLowerCase();
+    const matchText =
+      !kw ||
+      (d.decision_number || '').toLowerCase().includes(kw) ||
+      (d.className || '').toLowerCase().includes(kw) ||
+      (d.classCode || '').toLowerCase().includes(kw) ||
+      (d.trainingCourse || '').toLowerCase().includes(kw);
+    return matchClass && matchText;
+  });
 
   if (!selectedDecision) {
     return (
@@ -564,14 +587,27 @@ export default function NhapDiem() {
               </Space>
             </Col>
             <Col>
-              <Input
-                placeholder="Tìm quyết định, tên lớp..."
-                prefix={<SearchOutlined />}
-                style={{ width: 280 }}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                allowClear
-              />
+              <Space wrap>
+                <Select
+                  placeholder="Lọc theo lớp học"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  popupMatchSelectWidth={false}
+                  style={{ width: 340, maxWidth: '100%' }}
+                  value={selectedClassFilter}
+                  onChange={(v) => setSelectedClassFilter(v)}
+                  options={classFilterOptions}
+                />
+                <Input
+                  placeholder="Tìm quyết định, tên lớp..."
+                  prefix={<SearchOutlined />}
+                  style={{ width: 260 }}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  allowClear
+                />
+              </Space>
             </Col>
           </Row>
         </Card>

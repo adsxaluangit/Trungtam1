@@ -134,12 +134,12 @@ export default function AppLayout() {
       .filter((k) => (k === '/' ? loc.pathname === '/' : loc.pathname.startsWith(k)))
       .sort((a, b) => b.length - a.length)[0] ?? '';
 
-  const tieuDe = TIEU_DE.find(([re]) => re.test(loc.pathname))?.[1] ?? 'PTNL – Trung tâm Đào tạo Phát triển nguồn lực';
+  const tieuDe = TIEU_DE.find(([re]) => re.test(loc.pathname))?.[1] ?? 'TRUNG TÂM – Trung tâm Đào tạo Phát triển nguồn lực';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider width={260} breakpoint="lg" collapsedWidth={72} className="sider">
-        <Tooltip title="Trung tâm Đào tạo Phát triển nguồn lực (PTNL)" placement="right">
+        <Tooltip title="Trung tâm Đào tạo Phát triển nguồn lực (TRUNG TÂM)" placement="right">
           <div className="logo" onClick={() => nav('/tong-quan')} style={{ cursor: 'pointer' }}>
             <div
               style={{
@@ -156,12 +156,12 @@ export default function AppLayout() {
             >
               <img
                 src="/logo.png"
-                alt="Logo PTNL"
+                alt="Logo TRUNG TÂM"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             </div>
             <div style={{ minWidth: 0, overflow: 'hidden' }}>
-              <b style={{ fontSize: 16, display: 'block', lineHeight: 1.25, color: '#ffffff' }}>PTNL</b>
+              <b style={{ fontSize: 16, display: 'block', lineHeight: 1.25, color: '#ffffff' }}>TRUNG TÂM</b>
               <small
                 style={{
                   fontSize: 11,

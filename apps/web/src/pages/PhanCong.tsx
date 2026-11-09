@@ -29,6 +29,7 @@ import {
   PrinterOutlined,
   ReloadOutlined,
   RobotOutlined,
+  SearchOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
@@ -56,6 +57,8 @@ export default function PhanCong() {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
   const [assignmentMap, setAssignmentMap] = useState<Record<string, any>>({});
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>();
+  const [searchDecisionText, setSearchDecisionText] = useState('');
 
   // Modal form states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -184,17 +187,23 @@ export default function PhanCong() {
     if (existingAssign && Array.isArray(existingAssign.schedule) && existingAssign.schedule.length > 0) {
       setExistingAssignmentId(existingAssign.documentId || existingAssign.id);
       setAssignmentRows(existingAssign.schedule);
+      const firstDate = existingAssign.schedule[0]?.date;
+      if (firstDate && dayjs(firstDate).isValid()) {
+        setAutoStartDate(dayjs(firstDate));
+      }
     } else {
       setExistingAssignmentId(null);
-      // Generate initial blank sessions from subjects
-      generateEmptyRows(record.classSubjects || []);
+      const initialDate =
+        record.startDate && dayjs(record.startDate).isValid() ? dayjs(record.startDate) : dayjs();
+      setAutoStartDate(initialDate);
+      // Generate initial blank sessions from subjects starting from initialDate
+      generateEmptyRows(record.classSubjects || [], initialDate);
     }
 
     setIsModalOpen(true);
   };
 
-  const generateEmptyRows = (classSubs: any[]) => {
-    const todayStr = autoStartDate.format('YYYY-MM-DD');
+  const generateEmptyRows = (classSubs: any[], baseDate: Dayjs = autoStartDate) => {
     const rows: DetailedAssignmentRow[] = [];
 
     classSubs.forEach((subRef: any) => {
@@ -205,11 +214,12 @@ export default function PhanCong() {
       const sessions = Math.max(1, Math.ceil(totalHours / 5));
 
       for (let i = 0; i < sessions; i++) {
+        const sessionIdx = rows.length;
         rows.push({
           subjectId: subId,
           subjectName: subName,
-          date: todayStr,
-          shift: 'Sáng',
+          date: baseDate.add(Math.floor(sessionIdx / 2), 'day').format('YYYY-MM-DD'),
+          shift: sessionIdx % 2 === 0 ? 'Sáng' : 'Chiều',
           teacherId: '',
           teacherName: '',
           notes: '',
@@ -222,7 +232,7 @@ export default function PhanCong() {
       rows.push({
         subjectId: '',
         subjectName: '',
-        date: todayStr,
+        date: baseDate.format('YYYY-MM-DD'),
         shift: 'Sáng',
         teacherId: '',
         teacherName: '',
@@ -234,21 +244,40 @@ export default function PhanCong() {
     setAssignmentRows(rows);
   };
 
+  const handleStartDateChange = (newDate: Dayjs | null) => {
+    if (!newDate) return;
+    setAutoStartDate(newDate);
+    setAssignmentRows((prevRows) =>
+      prevRows.map((row, idx) => ({
+        ...row,
+        date: newDate.add(Math.floor(idx / 2), 'day').format('YYYY-MM-DD'),
+        shift: idx % 2 === 0 ? 'Sáng' : 'Chiều',
+      })),
+    );
+  };
+
   const handleResetFromSubjects = () => {
     if (!selectedDecision) return;
-    generateEmptyRows(selectedDecision.classSubjects || []);
+    generateEmptyRows(selectedDecision.classSubjects || [], autoStartDate);
     message.info('Đã tải lại danh sách buổi dạy từ chương trình đào tạo.');
   };
 
   const handleAddRow = () => {
     const lastRow = assignmentRows[assignmentRows.length - 1];
+    const nextDate = lastRow?.date
+      ? lastRow.shift === 'Sáng'
+        ? lastRow.date
+        : dayjs(lastRow.date).add(1, 'day').format('YYYY-MM-DD')
+      : autoStartDate.format('YYYY-MM-DD');
+    const nextShift: 'Sáng' | 'Chiều' = lastRow?.shift === 'Sáng' ? 'Chiều' : 'Sáng';
+
     setAssignmentRows([
       ...assignmentRows,
       {
         subjectId: lastRow?.subjectId || '',
         subjectName: lastRow?.subjectName || '',
-        date: lastRow?.date || autoStartDate.format('YYYY-MM-DD'),
-        shift: 'Sáng',
+        date: nextDate,
+        shift: nextShift,
         teacherId: '',
         teacherName: '',
         notes: '',
@@ -302,7 +331,20 @@ export default function PhanCong() {
     });
 
     // Add current form rows that have a teacher
-    const currentRows = [...assignmentRows];
+    const allSameSlot =
+      assignmentRows.length > 1 &&
+      assignmentRows.every(
+        (r) => r.date === assignmentRows[0].date && r.shift === assignmentRows[0].shift,
+      );
+    const currentRows = assignmentRows.map((r, idx) =>
+      allSameSlot
+        ? {
+            ...r,
+            date: autoStartDate.add(Math.floor(idx / 2), 'day').format('YYYY-MM-DD'),
+            shift: (idx % 2 === 0 ? 'Sáng' : 'Chiều') as 'Sáng' | 'Chiều' | 'Tối',
+          }
+        : { ...r },
+    );
     currentRows.forEach((r) => {
       if (r.teacherId && r.date && r.shift) {
         const d = r.date;
@@ -862,6 +904,35 @@ export default function PhanCong() {
     },
   ];
 
+  const classFilterOptions = Array.from(
+    new Map(
+      decisions
+        .filter((d) => d.classId || d.className)
+        .map((d) => {
+          const key = String(d.classId || d.className);
+          return [
+            key,
+            {
+              value: key,
+              label: `${d.classCode ? `[${d.classCode}] ` : ''}${d.className}`,
+            },
+          ];
+        }),
+    ).values(),
+  );
+
+  const filteredDecisions = decisions.filter((d) => {
+    const matchClass = !selectedClassFilter || String(d.classId || d.className) === String(selectedClassFilter);
+    const kw = searchDecisionText.trim().toLowerCase();
+    const matchText =
+      !kw ||
+      (d.decision_number || '').toLowerCase().includes(kw) ||
+      (d.className || '').toLowerCase().includes(kw) ||
+      (d.classCode || '').toLowerCase().includes(kw) ||
+      (d.trainingCourse || '').toLowerCase().includes(kw);
+    return matchClass && matchText;
+  });
+
   return (
     <div style={{ padding: '0 0 24px 0' }}>
       <Card style={{ marginBottom: 16 }}>
@@ -880,7 +951,26 @@ export default function PhanCong() {
             </Space>
           </Col>
           <Col>
-            <Space>
+            <Space wrap>
+              <Select
+                placeholder="Lọc theo lớp học"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                popupMatchSelectWidth={false}
+                style={{ width: 320, maxWidth: '100%' }}
+                value={selectedClassFilter}
+                onChange={(v) => setSelectedClassFilter(v)}
+                options={classFilterOptions}
+              />
+              <Input
+                placeholder="Tìm quyết định, mã lớp, tên lớp..."
+                prefix={<SearchOutlined />}
+                style={{ width: 240 }}
+                value={searchDecisionText}
+                onChange={(e) => setSearchDecisionText(e.target.value)}
+                allowClear
+              />
               <Button
                 type="primary"
                 style={{ background: '#059669', borderColor: '#059669' }}
@@ -900,12 +990,12 @@ export default function PhanCong() {
       <Card>
         {loading ? (
           <Skeleton active paragraph={{ rows: 8 }} />
-        ) : decisions.length === 0 ? (
+        ) : filteredDecisions.length === 0 ? (
           <Empty description="Không có lớp học hoặc quyết định mở lớp nào cần phân công." />
         ) : (
           <Table
             columns={columns}
-            dataSource={decisions}
+            dataSource={filteredDecisions}
             rowKey={(r) => r.documentId || r.id}
             pagination={{ pageSize: 10, showTotal: (t) => `Tổng số ${t} lớp` }}
           />
@@ -950,7 +1040,7 @@ export default function PhanCong() {
                 <Text strong>Từ ngày:</Text>
                 <DatePicker
                   value={autoStartDate}
-                  onChange={(d) => d && setAutoStartDate(d)}
+                  onChange={handleStartDateChange}
                   format="DD/MM/YYYY"
                   allowClear={false}
                 />
