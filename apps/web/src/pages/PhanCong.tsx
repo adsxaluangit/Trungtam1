@@ -67,7 +67,83 @@ export default function PhanCong() {
   const [assignmentRows, setAssignmentRows] = useState<DetailedAssignmentRow[]>([]);
   const [existingAssignmentId, setExistingAssignmentId] = useState<string | null>(null);
   const [autoStartDate, setAutoStartDate] = useState<Dayjs>(dayjs());
-  const [globalOccupancy, setGlobalOccupancy] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
+  const [globalOccupancy, setGlobalOccupancy] = useState<Record<string, Record<string, Record<string, string>>>>({});
+
+  const isSameTeacher = (t: any, teacherId?: string) => {
+    if (!t || !teacherId) return false;
+    const target = String(teacherId);
+    return (
+      String(t.documentId || '') === target ||
+      String(t.id || '') === target ||
+      String(t.strapiId || '') === target
+    );
+  };
+
+  const matchSubject = (subObjOrId: any, targetId?: string, targetName?: string) => {
+    if (!subObjOrId) return false;
+    if (typeof subObjOrId === 'string' || typeof subObjOrId === 'number') {
+      if (!targetId) return false;
+      if (String(subObjOrId) === String(targetId)) return true;
+      const sA = subjects.find(
+        (ms) =>
+          String(ms.documentId) === String(subObjOrId) ||
+          String(ms.id) === String(subObjOrId) ||
+          String(ms.strapiId) === String(subObjOrId),
+      );
+      const sB = subjects.find(
+        (ms) =>
+          String(ms.documentId) === String(targetId) ||
+          String(ms.id) === String(targetId) ||
+          String(ms.strapiId) === String(targetId),
+      );
+      return Boolean(sA && sB && String(sA.documentId || sA.id) === String(sB.documentId || sB.id));
+    }
+    const item = subObjOrId.attributes ? { ...subObjOrId.attributes, ...subObjOrId } : subObjOrId;
+    if (targetId) {
+      const sDocId = item.documentId ? String(item.documentId) : '';
+      const sId = item.id !== undefined ? String(item.id) : '';
+      const sStrapiId = item.strapiId !== undefined ? String(item.strapiId) : '';
+      const tId = String(targetId);
+      if (tId === sDocId || tId === sId || tId === sStrapiId) return true;
+
+      const masterSub = subjects.find(
+        (ms) =>
+          String(ms.documentId) === tId ||
+          String(ms.id) === tId ||
+          String(ms.strapiId) === tId,
+      );
+      if (masterSub) {
+        const mDoc = masterSub.documentId ? String(masterSub.documentId) : '';
+        const mStrapi = masterSub.strapiId !== undefined ? String(masterSub.strapiId) : '';
+        if (
+          (mDoc && (mDoc === sDocId || mDoc === sId)) ||
+          (mStrapi && (mStrapi === sId || mStrapi === sStrapiId)) ||
+          (masterSub.code && item.code && String(masterSub.code) === String(item.code))
+        ) {
+          return true;
+        }
+      }
+    }
+    if (targetName && item.name) {
+      return item.name.trim().toLowerCase() === targetName.trim().toLowerCase();
+    }
+    return false;
+  };
+
+  const teacherCanTeachSubject = (teacher: any, subjectId?: string, subjectName?: string) => {
+    if (!subjectId && !subjectName) return true;
+    const rawSubs = Array.isArray(teacher?.subjects)
+      ? teacher.subjects
+      : teacher?.subjects?.data || [];
+    return rawSubs.some((ts: any) => matchSubject(ts, subjectId, subjectName));
+  };
+
+  const isTeacherBusyOtherDecision = (date: string, shift: string, teacherId: string) => {
+    const occupiedByDec = globalOccupancy[date]?.[shift]?.[teacherId];
+    if (!occupiedByDec) return false;
+    const currentDecId = String(selectedDecision?.documentId || selectedDecision?.id || '');
+    return occupiedByDec !== currentDecId;
+  };
 
   // Print modal
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -97,10 +173,10 @@ export default function PhanCong() {
 
       // Build map of decisionId -> assignment
       const aMap: Record<string, any> = {};
-      const occupancy: Record<string, Record<string, Record<string, boolean>>> = {};
+      const occupancy: Record<string, Record<string, Record<string, string>>> = {};
 
       allAssigns.forEach((a: any) => {
-        const decRel = a.decision;
+        const decRel = a.decision?.data || a.decision;
         const decId = String(decRel?.documentId || decRel?.id || '');
         if (decId) aMap[decId] = a;
 
@@ -109,10 +185,16 @@ export default function PhanCong() {
             if (row.date && row.shift && row.teacherId) {
               const d = row.date;
               const s = row.shift;
-              const tId = String(row.teacherId);
+              const matchedT = allTeachers.find(
+                (t: any) =>
+                  String(t.documentId) === String(row.teacherId) ||
+                  String(t.id) === String(row.teacherId) ||
+                  String(t.strapiId) === String(row.teacherId),
+              );
+              const tId = matchedT ? String(matchedT.documentId || matchedT.id) : String(row.teacherId);
               if (!occupancy[d]) occupancy[d] = {};
               if (!occupancy[d][s]) occupancy[d][s] = {};
-              occupancy[d][s][tId] = true;
+              occupancy[d][s][tId] = decId || 'other';
             }
           });
         }
@@ -186,8 +268,19 @@ export default function PhanCong() {
 
     if (existingAssign && Array.isArray(existingAssign.schedule) && existingAssign.schedule.length > 0) {
       setExistingAssignmentId(existingAssign.documentId || existingAssign.id);
-      setAssignmentRows(existingAssign.schedule);
-      const firstDate = existingAssign.schedule[0]?.date;
+      const normalizedSchedule = existingAssign.schedule.map((r: any) => {
+        const matchedSub = subjects.find((s) => matchSubject(s, r.subjectId, r.subjectName));
+        const matchedTeacher = teachers.find((t) => isSameTeacher(t, r.teacherId));
+        return {
+          ...r,
+          subjectId: matchedSub ? String(matchedSub.documentId || matchedSub.id) : r.subjectId,
+          subjectName: matchedSub?.name || r.subjectName || '',
+          teacherId: matchedTeacher ? String(matchedTeacher.documentId || matchedTeacher.id) : r.teacherId || '',
+          teacherName: matchedTeacher ? matchedTeacher.full_name || matchedTeacher.name || '' : r.teacherName || '',
+        };
+      });
+      setAssignmentRows(normalizedSchedule);
+      const firstDate = normalizedSchedule[0]?.date;
       if (firstDate && dayjs(firstDate).isValid()) {
         setAutoStartDate(dayjs(firstDate));
       }
@@ -297,10 +390,18 @@ export default function PhanCong() {
     next[index] = { ...next[index], [field]: value };
 
     if (field === 'subjectId') {
-      const foundSub = subjects.find((s) => String(s.documentId || s.id) === String(value));
+      const foundSub = subjects.find((s) => matchSubject(s, value));
       next[index].subjectName = foundSub?.name || '';
+      if (next[index].teacherId) {
+        const currentTeacher = teachers.find((t) => isSameTeacher(t, next[index].teacherId));
+        if (currentTeacher && !teacherCanTeachSubject(currentTeacher, value, foundSub?.name)) {
+          next[index].teacherId = '';
+          next[index].teacherName = '';
+          next[index].isAutoFilled = false;
+        }
+      }
     } else if (field === 'teacherId') {
-      const foundTeacher = teachers.find((t) => String(t.documentId || t.id) === String(value));
+      const foundTeacher = teachers.find((t) => isSameTeacher(t, value));
       next[index].teacherName = foundTeacher?.full_name || foundTeacher?.name || '';
       next[index].isAutoFilled = false;
     }
@@ -318,14 +419,18 @@ export default function PhanCong() {
 
     // Build teacher occupancy from other assignments + current assigned rows
     const busyShift: Record<string, Record<string, Set<string>>> = {};
+    const currentDecId = String(selectedDecision?.documentId || selectedDecision?.id || '');
 
-    // Copy global occupancy
+    // Copy global occupancy from OTHER decisions
     Object.keys(globalOccupancy).forEach((d) => {
       if (!busyShift[d]) busyShift[d] = {};
       Object.keys(globalOccupancy[d]).forEach((s) => {
         if (!busyShift[d][s]) busyShift[d][s] = new Set();
         Object.keys(globalOccupancy[d][s]).forEach((tId) => {
-          if (globalOccupancy[d][s][tId]) busyShift[d][s].add(tId);
+          const occDecId = globalOccupancy[d][s][tId];
+          if (occDecId && occDecId !== currentDecId) {
+            busyShift[d][s].add(tId);
+          }
         });
       });
     });
@@ -356,7 +461,7 @@ export default function PhanCong() {
       }
     });
 
-    // Subject teacher cache
+    // Subject teacher cache (1 teacher = 1 subject in the same course)
     const courseTeacherSubject: Record<string, string> = {};
     currentRows.forEach((r) => {
       if (r.teacherId && r.subjectId) {
@@ -364,23 +469,20 @@ export default function PhanCong() {
       }
     });
 
-    const canTeach = (t: any, subId: string) => {
-      const tSubs = t.subjects || [];
-      return tSubs.some((ts: any) => String(ts.documentId || ts.id) === String(subId));
-    };
-
     let filled = 0;
     for (let i = 0; i < currentRows.length; i++) {
       const row = currentRows[i];
       if (row.teacherId) continue;
 
       const subId = row.subjectId;
-      if (!subId) continue;
+      if (!subId && !row.subjectName) continue;
 
-      const qualified = teachers.filter((t) => canTeach(t, subId));
+      const qualified = teachers.filter((t) => teacherCanTeachSubject(t, subId, row.subjectName));
       const available = qualified.filter((t) => {
         const tId = String(t.documentId || t.id);
-        if (courseTeacherSubject[tId] && courseTeacherSubject[tId] !== subId) return false;
+        if (courseTeacherSubject[tId] && !matchSubject(courseTeacherSubject[tId], subId, row.subjectName)) {
+          return false;
+        }
         if (busyShift[row.date]?.[row.shift]?.has(tId)) return false;
 
         // Check sessions count in day (max 2)
@@ -398,8 +500,14 @@ export default function PhanCong() {
       available.sort((a, b) => {
         const aId = String(a.documentId || a.id);
         const bId = String(b.documentId || b.id);
-        const aMatch = courseTeacherSubject[aId] === subId ? 1 : 0;
-        const bMatch = courseTeacherSubject[bId] === subId ? 1 : 0;
+        const aMatch =
+          courseTeacherSubject[aId] && matchSubject(courseTeacherSubject[aId], subId, row.subjectName)
+            ? 1
+            : 0;
+        const bMatch =
+          courseTeacherSubject[bId] && matchSubject(courseTeacherSubject[bId], subId, row.subjectName)
+            ? 1
+            : 0;
         return bMatch - aMatch;
       });
 
@@ -1125,10 +1233,15 @@ export default function PhanCong() {
                   style={{ width: '100%' }}
                   value={record.subjectId || undefined}
                   placeholder="Chọn môn học"
+                  showSearch
+                  optionFilterProp="children"
                   onChange={(val) => handleFieldChange(idx, 'subjectId', val)}
                 >
-                  {(selectedDecision?.classSubjects || subjects).map((s: any) => (
-                    <Select.Option key={s.documentId || s.id} value={s.documentId || s.id}>
+                  {(selectedDecision?.classSubjects?.length > 0
+                    ? selectedDecision.classSubjects
+                    : subjects
+                  ).map((s: any) => (
+                    <Select.Option key={s.documentId || s.id} value={String(s.documentId || s.id)}>
                       {s.name} ({s.code})
                     </Select.Option>
                   ))}
@@ -1165,40 +1278,89 @@ export default function PhanCong() {
             },
             {
               title: 'Giảng viên phụ trách',
-              width: 220,
+              width: 240,
               render: (_, record, idx) => {
-                // Determine which teachers can teach this subject
-                const subId = record.subjectId;
+                // Chỉ lọc những giảng viên có chuyên môn dạy môn học này (hoặc đang được gán sẵn ở dòng này)
+                const qualifiedTeachers = teachers.filter(
+                  (t) =>
+                    teacherCanTeachSubject(t, record.subjectId, record.subjectName) ||
+                    isSameTeacher(t, record.teacherId),
+                );
+
+                const options = qualifiedTeachers
+                  .map((t) => {
+                    const tId = String(t.documentId || t.id);
+                    const isCurrentSelected = isSameTeacher(t, record.teacherId);
+                    const isBusyOtherClass = isTeacherBusyOtherDecision(
+                      record.date,
+                      record.shift,
+                      tId,
+                    );
+                    const isBusySameSlot = assignmentRows.some(
+                      (r, rIdx) =>
+                        rIdx !== idx &&
+                        r.date === record.date &&
+                        r.shift === record.shift &&
+                        isSameTeacher(t, r.teacherId),
+                    );
+                    const teachingOtherSubInCourse = assignmentRows.some(
+                      (r, rIdx) =>
+                        rIdx !== idx &&
+                        isSameTeacher(t, r.teacherId) &&
+                        r.subjectId &&
+                        record.subjectId &&
+                        !matchSubject(r.subjectId, record.subjectId, record.subjectName),
+                    );
+
+                    // Đếm số ca dạy trong ngày của giảng viên
+                    const busyShiftsInDay = new Set<string>();
+                    ['Sáng', 'Chiều', 'Tối'].forEach((sh) => {
+                      if (isTeacherBusyOtherDecision(record.date, sh, tId)) {
+                        busyShiftsInDay.add(sh);
+                      }
+                    });
+                    assignmentRows.forEach((r, rIdx) => {
+                      if (rIdx !== idx && r.date === record.date && isSameTeacher(t, r.teacherId)) {
+                        busyShiftsInDay.add(r.shift);
+                      }
+                    });
+                    const tooManyShifts =
+                      !busyShiftsInDay.has(record.shift) && busyShiftsInDay.size >= 2;
+
+                    const disabled =
+                      !isCurrentSelected &&
+                      (isBusyOtherClass ||
+                        isBusySameSlot ||
+                        teachingOtherSubInCourse ||
+                        tooManyShifts);
+
+                    let reason = '';
+                    if (isBusyOtherClass) reason = ' (Bận lớp khác ca này)';
+                    else if (isBusySameSlot) reason = ' (Trùng ca trong lớp)';
+                    else if (teachingOtherSubInCourse) reason = ' (Đã dạy môn khác của lớp)';
+                    else if (tooManyShifts) reason = ' (Đã đủ 2 ca/ngày)';
+
+                    return {
+                      value: tId,
+                      label: `${t.full_name || t.name}${reason}`,
+                      disabled,
+                    };
+                  })
+                  .sort((a, b) => Number(a.disabled) - Number(b.disabled));
+
                 return (
                   <Select
                     style={{ width: '100%' }}
                     value={record.teacherId || undefined}
-                    placeholder="Chọn giảng viên"
+                    placeholder="Chọn giảng viên đúng chuyên môn"
                     allowClear
                     showSearch
-                    filterOption={(input, option) =>
-                      String(option?.children || '')
-                        .toLowerCase()
-                        .includes(input.toLowerCase())
-                    }
-                    onChange={(val) => handleFieldChange(idx, 'teacherId', val)}
-                  >
-                    {teachers.map((t) => {
-                      const tId = String(t.documentId || t.id);
-                      const isBusy = globalOccupancy[record.date]?.[record.shift]?.[tId];
-                      const canT =
-                        !subId ||
-                        (t.subjects || []).some(
-                          (ts: any) => String(ts.documentId || ts.id) === String(subId),
-                        );
-                      const label = `${t.full_name || t.name}${isBusy ? ' (Bận ca này)' : ''}${!canT ? ' (Khác chuyên môn)' : ''}`;
-                      return (
-                        <Select.Option key={tId} value={tId} disabled={isBusy}>
-                          {label}
-                        </Select.Option>
-                      );
-                    })}
-                  </Select>
+                    optionFilterProp="label"
+                    popupMatchSelectWidth={false}
+                    notFoundContent="Chưa có GV phân công chuyên môn môn này"
+                    options={options}
+                    onChange={(val) => handleFieldChange(idx, 'teacherId', val || '')}
+                  />
                 );
               },
             },

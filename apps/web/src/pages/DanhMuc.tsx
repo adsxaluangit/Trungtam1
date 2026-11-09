@@ -157,17 +157,17 @@ export default function DanhMuc() {
 
   const querySubjects = useQuery({
     queryKey: ['cat-subjects'],
-    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.SUBJECTS}?pagination[pageSize]=200&publicationState=preview`)),
+    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.SUBJECTS}?pagination[pageSize]=500&publicationState=preview`)),
   });
 
   const queryTeachers = useQuery({
     queryKey: ['cat-teachers'],
-    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.TEACHERS}?populate=*&pagination[pageSize]=200&publicationState=preview`)),
+    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.TEACHERS}?populate=*&pagination[pageSize]=500&publicationState=preview`)),
   });
 
   const queryClasses = useQuery({
     queryKey: ['cat-classes'],
-    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.CLASSES}?populate=*&pagination[pageSize]=200&publicationState=preview`)),
+    queryFn: async () => normalizeStrapiList(await api<any>(`/${COLLECTIONS.CLASSES}?populate=*&pagination[pageSize]=500&publicationState=preview`)),
   });
 
   // Xác định collection hiện tại dựa trên activeTab
@@ -320,6 +320,41 @@ export default function DanhMuc() {
     setMoModal(true);
   };
 
+  const extractSubjectObjects = (rawSubs: any): any[] => {
+    const list = Array.isArray(rawSubs) ? rawSubs : rawSubs?.data || [];
+    return list
+      .map((s: any) => {
+        if (!s) return null;
+        const item = s.attributes ? { ...s.attributes, ...s } : s;
+        if (item.name) return item;
+        const matched = querySubjects.data?.find(
+          (ms: any) =>
+            String(ms.documentId) === String(item.documentId || item.id) ||
+            String(ms.strapiId) === String(item.id),
+        );
+        return matched || item;
+      })
+      .filter(Boolean);
+  };
+
+  const extractSubjectIds = (rawSubs: any) => {
+    const list = Array.isArray(rawSubs) ? rawSubs : rawSubs?.data || [];
+    return list
+      .map((s: any) => {
+        if (!s) return null;
+        const docId = s.documentId || s.attributes?.documentId;
+        const rawId = s.id || s.strapiId;
+        const matched = querySubjects.data?.find(
+          (ms: any) =>
+            (docId && String(ms.documentId) === String(docId)) ||
+            (rawId !== undefined &&
+              (String(ms.id) === String(rawId) || String(ms.strapiId) === String(rawId))),
+        );
+        return matched ? matched.documentId || matched.id : docId || rawId;
+      })
+      .filter(Boolean);
+  };
+
   const moSua = (item: any) => {
     setEditingItem(item);
     form.resetFields();
@@ -328,12 +363,10 @@ export default function DanhMuc() {
     if (activeTab === 'classes') {
       vals.startDate = item.start_date ? dayjs(item.start_date) : null;
       vals.endDate = item.end_date ? dayjs(item.end_date) : null;
-      // subjects mapping
-      const subs = item.subjects || [];
-      vals.subjects = subs.map((s: any) => s.documentId || s.id);
+      vals.subjects = extractSubjectIds(item.subjects);
     } else if (activeTab === 'teachers') {
-      const subs = item.subjects || [];
-      vals.subjects = subs.map((s: any) => s.documentId || s.id);
+      vals.name = item.name || item.full_name || '';
+      vals.subjects = extractSubjectIds(item.subjects);
     }
 
     form.setFieldsValue(vals);
@@ -344,12 +377,18 @@ export default function DanhMuc() {
   const locDuLieu = (data: any[]) => {
     if (!tuKhoa.trim()) return data;
     const k = tuKhoa.toLowerCase();
-    return data.filter(
-      (it: any) =>
-        (it.name || '').toLowerCase().includes(k) ||
+    return data.filter((it: any) => {
+      const subText = extractSubjectObjects(it.subjects)
+        .map((s: any) => `${s.code || ''} ${s.name || ''}`.toLowerCase())
+        .join(' ');
+      return (
+        (it.name || it.full_name || '').toLowerCase().includes(k) ||
         (it.code || '').toLowerCase().includes(k) ||
-        (it.phone || '').includes(k),
-    );
+        (it.phone || '').includes(k) ||
+        (it.specialization || '').toLowerCase().includes(k) ||
+        subText.includes(k)
+      );
+    });
   };
 
   // Tabs Header
@@ -373,9 +412,26 @@ export default function DanhMuc() {
       title: 'Môn học',
       dataIndex: 'subjects',
       key: 'subjects',
-      render: (subs: any[]) => (
-        <span>{Array.isArray(subs) ? subs.length : 0} môn</span>
-      ),
+      render: (rawSubs: any) => {
+        const subs = extractSubjectObjects(rawSubs);
+        if (subs.length === 0) {
+          return <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 12 }}>0 môn</span>;
+        }
+        return (
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4, color: '#1d4ed8' }}>
+              {subs.length} môn học:
+            </div>
+            <Space size={[4, 4]} wrap>
+              {subs.map((s: any, idx: number) => (
+                <Tag color="geekblue" key={s.documentId || s.id || idx} style={{ margin: 0 }}>
+                  {s.name}
+                </Tag>
+              ))}
+            </Space>
+          </div>
+        );
+      },
     },
     {
       title: 'Trạng thái',
@@ -403,10 +459,38 @@ export default function DanhMuc() {
   const colTeachers: TableProps<any>['columns'] = [
     { title: 'STT', width: 60, align: 'center', render: (_, __, i) => i + 1 },
     { title: 'Mã GV', dataIndex: 'code', key: 'code', width: 110, render: (v) => <Tag color="purple">{v}</Tag> },
-    { title: 'Họ và tên', dataIndex: 'name', key: 'name', render: (v) => <b>{v}</b> },
-    { title: 'Chuyên môn', dataIndex: 'specialization', key: 'specialization' },
+    { title: 'Họ và tên', dataIndex: 'name', key: 'name', width: 200, render: (v, r) => <b>{v || r.full_name}</b> },
+    {
+      title: 'Chuyên môn (Môn học giảng dạy)',
+      key: 'specialization',
+      render: (_, r) => {
+        const subs = extractSubjectObjects(r.subjects);
+        return (
+          <div>
+            {r.specialization ? (
+              <div style={{ marginBottom: subs.length > 0 ? 4 : 0, fontWeight: 500, color: '#334155' }}>
+                {r.specialization}
+              </div>
+            ) : null}
+            {subs.length > 0 ? (
+              <Space size={[4, 4]} wrap>
+                {subs.map((s: any, idx: number) => (
+                  <Tag color="blue" key={s.documentId || s.id || idx} style={{ margin: 0 }}>
+                    {s.code ? `[${s.code}] ${s.name}` : s.name}
+                  </Tag>
+                ))}
+              </Space>
+            ) : !r.specialization ? (
+              <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: 12 }}>
+                Chưa phân công môn học
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
     { title: 'Điện thoại', dataIndex: 'phone', key: 'phone', width: 130 },
-    { title: 'Email', dataIndex: 'email', key: 'email' },
+    { title: 'Email', dataIndex: 'email', key: 'email', width: 180 },
     {
       title: 'Thao tác',
       key: 'actions',
@@ -679,6 +763,8 @@ export default function DanhMuc() {
               <Form.Item name="subjects" label="Môn học trong chương trình đào tạo">
                 <Select
                   mode="multiple"
+                  showSearch
+                  optionFilterProp="label"
                   placeholder="Chọn các môn học..."
                   options={querySubjects.data?.map((s: any) => ({
                     value: s.documentId || s.id,
@@ -737,18 +823,20 @@ export default function DanhMuc() {
                   </Form.Item>
                 </Col>
               </Row>
-              <Form.Item name="specialization" label="Chuyên môn giảng dạy">
-                <Input placeholder="Điều khiển tàu biển, Máy tàu..." />
-              </Form.Item>
-              <Form.Item name="subjects" label="Môn học có thể đảm nhận">
+              <Form.Item name="subjects" label="Chuyên môn (Các môn học được phân công giảng dạy)">
                 <Select
                   mode="multiple"
-                  placeholder="Chọn các môn học..."
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Chọn các môn học giảng viên được phân công dạy..."
                   options={querySubjects.data?.map((s: any) => ({
                     value: s.documentId || s.id,
                     label: `[${s.code}] ${s.name}`,
                   }))}
                 />
+              </Form.Item>
+              <Form.Item name="specialization" label="Ghi chú chuyên ngành / Học vị (nếu có)">
+                <Input placeholder="Vd: Thạc sĩ Điều khiển tàu biển, Máy tàu..." />
               </Form.Item>
             </>
           )}
