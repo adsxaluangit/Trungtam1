@@ -4,8 +4,10 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Col,
   DatePicker,
+  Empty,
   Form,
   Grid,
   Input,
@@ -15,6 +17,7 @@ import {
   Row,
   Select,
   Space,
+  Tag,
   Typography,
   Upload,
 } from 'antd';
@@ -25,6 +28,8 @@ import {
   PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -32,6 +37,15 @@ import { api, checkDuplicateStudent, COLLECTIONS, normalizeStrapiList, uploadFil
 import { PROVINCES_LIST, toIso } from '../constants';
 
 const { Title, Text, Paragraph } = Typography;
+
+const boDauTiengViet = (str: string) =>
+  (str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
 
 export default function DangKy() {
   const { message } = App.useApp();
@@ -42,6 +56,11 @@ export default function DangKy() {
   const [dangGui, setDangGui] = useState(false);
   const [thanhCong, setThanhCong] = useState(false);
   const [thongTinDangKy, setThongTinDangKy] = useState<{ hoTen: string; lop: string; soCccd: string } | null>(null);
+
+  // Modal chọn lớp học (chống trượt màn hình trên Mobile & hỗ trợ tìm kiếm Mã lớp)
+  const [moChonLopModal, setMoChonLopModal] = useState(false);
+  const [tuKhoaLop, setTuKhoaLop] = useState('');
+  const selectedClassIds: string[] = Form.useWatch('classIds', form) || [];
 
   // Ảnh 3x4 và CCCD 2 mặt
   const [anh3x4, setAnh3x4] = useState<string | null>(null);
@@ -58,11 +77,37 @@ export default function DangKy() {
     queryKey: ['public-classes'],
     queryFn: async () => {
       const res = await api<any>(
-        `/${COLLECTIONS.CLASSES}?populate=*&sort=createdAt:desc&pagination[pageSize]=100&publicationState=preview`,
+        `/${COLLECTIONS.CLASSES}?populate=*&sort=createdAt:desc&pagination[pageSize]=500&publicationState=preview`,
       );
       return normalizeStrapiList(res);
     },
   });
+
+  const khopTuKhoaLop = (c: any, keyword: string) => {
+    if (!keyword || !keyword.trim()) return true;
+    const rawKw = keyword.toLowerCase().trim();
+    const kwNoAccent = boDauTiengViet(keyword);
+    const codeStr = String(c?.code || '').toLowerCase();
+    const nameStr = String(c?.name || '').toLowerCase();
+    return (
+      codeStr.includes(rawKw) ||
+      nameStr.includes(rawKw) ||
+      boDauTiengViet(c?.code || '').includes(kwNoAccent) ||
+      boDauTiengViet(c?.name || '').includes(kwNoAccent)
+    );
+  };
+
+  const danhSachLopLoc = (danhSachLop || []).filter((c: any) => khopTuKhoaLop(c, tuKhoaLop));
+
+  const toggleChonLop = (classVal: string) => {
+    const current: string[] = form.getFieldValue('classIds') || [];
+    const exists = current.some((id) => String(id) === String(classVal));
+    const next = exists
+      ? current.filter((id) => String(id) !== String(classVal))
+      : [...current, classVal];
+    form.setFieldsValue({ classIds: next });
+    form.validateFields(['classIds']).catch(() => {});
+  };
 
   // Chuyển file sang Base64
   const fileToBase64 = (file: File): Promise<string> =>
@@ -398,7 +443,7 @@ export default function DangKy() {
               >
                 <img
                   src="/logo.png"
-                  alt="Logo TRUNG TÂM"
+                  alt="Logo PTNL"
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 />
               </div>
@@ -551,20 +596,124 @@ export default function DangKy() {
             </Title>
             <Form.Item
               name="classIds"
-              label="Chọn lớp học (Có thể chọn nhiều lớp):"
+              label="Chọn lớp học (Có thể chọn nhiều lớp - Tìm theo Mã lớp hoặc Tên lớp):"
               rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 lớp học!' }]}
             >
-              <Select
-                mode="multiple"
-                placeholder="Tìm kiếm và chọn lớp học..."
-                loading={dangTaiLop}
-                allowClear
-                options={danhSachLop?.map((c: any) => ({
-                  value: c.documentId || c.id,
-                  label: `${c.code ? `[${c.code}] ` : ''}${c.name}`,
-                }))}
-              />
+              {isMobile ? (
+                <Select
+                  mode="multiple"
+                  style={{ display: 'none' }}
+                  options={danhSachLop?.map((c: any) => ({
+                    value: c.documentId || c.id,
+                    label: `${c.code ? `[${c.code}] ` : ''}${c.name}`,
+                  }))}
+                />
+              ) : (
+                <Select
+                  mode="multiple"
+                  showSearch
+                  placeholder="Gõ Mã lớp học hoặc Tên lớp học để tìm kiếm và chọn..."
+                  loading={dangTaiLop}
+                  allowClear
+                  popupMatchSelectWidth={false}
+                  getPopupContainer={(trigger) => trigger.parentElement || document.body}
+                  filterOption={(input, option: any) =>
+                    khopTuKhoaLop({ code: option?.code, name: option?.name || option?.label }, input)
+                  }
+                  options={danhSachLop?.map((c: any) => ({
+                    value: c.documentId || c.id,
+                    label: `${c.code ? `[${c.code}] ` : ''}${c.name}`,
+                    code: c.code || '',
+                    name: c.name || '',
+                  }))}
+                  optionRender={(oriOption) => {
+                    const data = oriOption.data as any;
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'normal', padding: '2px 0' }}>
+                        {data.code && (
+                          <Tag color="blue" style={{ margin: 0, fontWeight: 600 }}>
+                            {data.code}
+                          </Tag>
+                        )}
+                        <span>{data.name}</span>
+                      </div>
+                    );
+                  }}
+                />
+              )}
             </Form.Item>
+
+            {isMobile && (
+              <div style={{ marginTop: -12, marginBottom: 20 }}>
+                <div
+                  onClick={() => setMoChonLopModal(true)}
+                  style={{
+                    minHeight: 48,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: selectedClassIds.length > 0 ? '1.5px solid #1677ff' : '1px solid #d9d9d9',
+                    background: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  {selectedClassIds.length === 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#8c8c8c' }}>
+                      <span style={{ fontSize: 14 }}>Chạm vào đây để tìm Mã lớp / Tên lớp và chọn...</span>
+                      <SearchOutlined style={{ color: '#1677ff', fontSize: 16 }} />
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {selectedClassIds.map((id) => {
+                          const cls = danhSachLop?.find(
+                            (c: any) => String(c.documentId || c.id) === String(id),
+                          );
+                          return (
+                            <Tag
+                              key={id}
+                              color="blue"
+                              closable
+                              onClose={(e) => {
+                                e.stopPropagation();
+                                toggleChonLop(id);
+                              }}
+                              style={{
+                                margin: 0,
+                                padding: '4px 8px',
+                                fontSize: 13,
+                                whiteSpace: 'normal',
+                                height: 'auto',
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {cls ? `${cls.code ? `[${cls.code}] ` : ''}${cls.name}` : id}
+                            </Tag>
+                          );
+                        })}
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderTop: '1px dashed #e5e7eb',
+                          paddingTop: 6,
+                          fontSize: 13,
+                          color: '#1677ff',
+                          fontWeight: 500,
+                        }}
+                      >
+                        <span>Đã chọn {selectedClassIds.length} lớp học</span>
+                        <span>+ Chạm để chọn thêm / Bỏ chọn</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 3. Tải lên hình ảnh hồ sơ */}
             <Title level={5} style={{ color: '#1677ff', borderBottom: '1px solid #f0f0f0', paddingBottom: 8, marginTop: 24 }}>
@@ -690,6 +839,117 @@ export default function DangKy() {
           </Form>
         </Card>
       </div>
+
+      {/* Modal Chọn lớp học trên Mobile (cố định màn hình, không bị trượt khi cuộn) */}
+      <Modal
+        title={
+          <Space>
+            <UnorderedListOutlined style={{ color: '#1677ff' }} />
+            <span>Chọn lớp học đăng ký ({selectedClassIds.length} lớp)</span>
+          </Space>
+        }
+        open={moChonLopModal}
+        onCancel={() => setMoChonLopModal(false)}
+        width={isMobile ? '96%' : 620}
+        centered
+        styles={{
+          body: { padding: '12px 0 4px 0' },
+        }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <Button
+              disabled={selectedClassIds.length === 0}
+              onClick={() => {
+                form.setFieldsValue({ classIds: [] });
+              }}
+            >
+              Bỏ chọn hết
+            </Button>
+            <Button
+              type="primary"
+              size="large"
+              style={{ flex: 1, fontWeight: 600 }}
+              onClick={() => setMoChonLopModal(false)}
+            >
+              Xác nhận chọn ({selectedClassIds.length} lớp)
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ marginBottom: 10 }}>
+          <Input
+            prefix={<SearchOutlined style={{ color: '#1677ff' }} />}
+            placeholder="Tìm theo Mã lớp học (VD: ATCB) hoặc Tên lớp..."
+            allowClear
+            size="large"
+            value={tuKhoaLop}
+            onChange={(e) => setTuKhoaLop(e.target.value)}
+          />
+        </div>
+        <div
+          style={{
+            maxHeight: '56vh',
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehavior: 'contain',
+            paddingRight: 2,
+          }}
+        >
+          {danhSachLopLoc.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="Không tìm thấy lớp học phù hợp với từ khóa"
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {danhSachLopLoc.map((c: any) => {
+                const cId = String(c.documentId || c.id);
+                const isSelected = selectedClassIds.some((id) => String(id) === cId);
+                return (
+                  <div
+                    key={cId}
+                    onClick={() => toggleChonLop(cId)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: isSelected ? '1.5px solid #1677ff' : '1px solid #e5e7eb',
+                      background: isSelected ? '#eff6ff' : '#fafafa',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Checkbox checked={isSelected} style={{ marginTop: 2, pointerEvents: 'none' }} />
+                    <div style={{ flex: 1, lineHeight: 1.45 }}>
+                      {c.code && (
+                        <Tag
+                          color={isSelected ? 'blue' : 'default'}
+                          style={{ marginRight: 6, marginBottom: 2, fontWeight: 600 }}
+                        >
+                          {c.code}
+                        </Tag>
+                      )}
+                      <span
+                        style={{
+                          fontWeight: isSelected ? 600 : 500,
+                          color: isSelected ? '#1d4ed8' : '#1f2937',
+                          fontSize: 14,
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {c.name}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* Modal Camera chụp ảnh */}
       <Modal
