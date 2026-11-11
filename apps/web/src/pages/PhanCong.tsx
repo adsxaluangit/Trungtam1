@@ -815,7 +815,9 @@ export default function PhanCong() {
             </div>`
             : '';
 
-          const classCode = selectedDecision?.classCode || selectedDecision?.trainingCourse || selectedDecision?.className || '';
+          const classCode = selectedDecision?.classCode || selectedDecision?.className || '';
+          const trainingCourse =
+            selectedDecision?.trainingCourse || selectedDecision?.training_course || '';
           allPagesHtml += `
           <div class="page" style="${!isFirstPage ? 'page-break-before: always;' : ''}">
             <table style="width:100%; border:none; border-collapse:collapse; margin-bottom:6px; font-family:'Times New Roman',serif;">
@@ -833,7 +835,8 @@ export default function PhanCong() {
             </table>
             <table style="width:100%; border:none; border-collapse:collapse; margin:4px 0 8px 0; font-family:'Times New Roman',serif; font-size:12px;">
               <tr>
-                <td colspan="2" style="border:none !important; padding:2px 0;"><b>Lớp:</b> ${classCode}</td>
+                <td style="border:none !important; padding:2px 0; width:60%;"><b>Lớp:</b> ${classCode}</td>
+                <td style="border:none !important; padding:2px 0;"><b>Khóa/Đợt đào tạo:</b> ${trainingCourse}</td>
               </tr>
               <tr>
                 <td style="border:none !important; padding:2px 0; width:60%;"><b>Môn học:</b> ${subjectName}</td>
@@ -1118,7 +1121,9 @@ export default function PhanCong() {
             <span>
               Bảng phân công huấn luyện:{' '}
               <span style={{ color: '#1677ff' }}>
-                {selectedDecision?.className} (QĐ: {selectedDecision?.decision_number})
+                {selectedDecision?.className}
+                {selectedDecision?.trainingCourse ? ` - Khóa/Đợt: ${selectedDecision.trainingCourse}` : ''}{' '}
+                (QĐ: {selectedDecision?.decision_number})
               </span>
             </span>
           </Space>
