@@ -97,6 +97,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
 
   // Temp students in the edit modal
   const [tempStudents, setTempStudents] = useState<StudentDetail[]>([]);
+  const [modalStudentSearch, setModalStudentSearch] = useState('');
   const [lopDuocChon, setLopDuocChon] = useState<string | null>(null);
   const [relatedOpeningId, setRelatedOpeningId] = useState<string>('');
 
@@ -421,10 +422,13 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       setEditingItem(null);
       form.resetFields();
       setTempStudents([]);
+      setModalStudentSearch('');
       setLopDuocChon(null);
       setRelatedOpeningId('');
       setIsLockedViewMode(false);
+      setExpandedStudents({});
       qc.invalidateQueries({ queryKey: ['decisions-list'] });
+      qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
       qc.invalidateQueries({ queryKey: ['students-list'] });
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
     },
@@ -459,6 +463,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setIsLockedViewMode(false);
     form.resetFields();
     setTempStudents([]);
+    setModalStudentSearch('');
     setLopDuocChon(null);
     setRelatedOpeningId('');
     form.setFieldsValue({
@@ -475,6 +480,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setEditingItem(item);
     setIsLockedViewMode(lockedView);
     setTempStudents([]);
+    setModalStudentSearch('');
     setLopDuocChon(null);
     setRelatedOpeningId('');
     form.resetFields();
@@ -2807,10 +2813,43 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   };
 
   // ============================================================
+  // Xóa trực tiếp học viên khỏi dòng mở rộng của Quyết định
+  // ============================================================
+  const xoaHocVienKhoiDongMoRong = async (record: any, sv: StudentDetail) => {
+    const docId = String(record.documentId || record.id);
+    const currentList = expandedStudents[docId] || [];
+    const updatedList = currentList.filter((s) => String(s.id) !== String(sv.id));
+    const studentNumericIds = updatedList
+      .map((s) => {
+        if (s.strapiId && !isNaN(Number(s.strapiId))) return Number(s.strapiId);
+        if (s.id && !isNaN(Number(s.id))) return Number(s.id);
+        return null;
+      })
+      .filter(Boolean);
+    try {
+      await api(`/${COLLECTIONS.CLASS_DECISIONS}/${docId}`, {
+        method: 'PUT',
+        body: { data: { students: studentNumericIds } },
+      });
+      setExpandedStudents((prev) => ({ ...prev, [docId]: updatedList }));
+      if (editingItem && String(editingItem.documentId || editingItem.id) === docId) {
+        setTempStudents(updatedList);
+      }
+      message.success(`Đã xóa học viên "${sv.fullName}" khỏi quyết định`);
+      qc.invalidateQueries({ queryKey: ['decisions-list'] });
+      qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
+      qc.invalidateQueries({ queryKey: ['students-list'] });
+    } catch (err: any) {
+      message.error(err?.message || 'Lỗi khi xóa học viên khỏi quyết định');
+    }
+  };
+
+  // ============================================================
   // Expandable row render
   // ============================================================
   const renderExpandedRow = (record: any) => {
     const docId = record.documentId || record.id;
+    const locked = checkIfLocked(String(docId));
     const isLoading = expandedLoading[docId];
     const students: StudentDetail[] = expandedStudents[docId] || [];
 
@@ -2885,22 +2924,35 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       {
         title: 'Thao tác',
         key: 'actions',
-        width: 90,
+        width: 100,
         align: 'center',
-        render: (_: any, r: StudentDetail, idx: number) => (
+        render: (_: any, r: StudentDetail) => (
           <Space size={4}>
             <Tooltip title="Sửa thông tin HV">
               <Button
                 size="small"
                 icon={<EditOutlined />}
                 onClick={() => {
-                  // Open in modal edit form for this decision
+                  const realIdx = students.findIndex((s) => String(s.id) === String(r.id));
                   setTempStudents(students);
                   setEditingItem(record);
-                  moSuaHocVien(r, idx);
+                  if (realIdx >= 0) moSuaHocVien(r, realIdx);
                 }}
               />
             </Tooltip>
+            {!locked && (
+              <Popconfirm
+                title={`Xóa "${r.fullName}" khỏi quyết định này?`}
+                okText="Xóa"
+                cancelText="Hủy"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => xoaHocVienKhoiDongMoRong(record, r)}
+              >
+                <Tooltip title="Xóa khỏi quyết định">
+                  <Button size="small" danger icon={<DeleteOutlined />} />
+                </Tooltip>
+              </Popconfirm>
+            )}
           </Space>
         ),
       },
@@ -3443,8 +3495,18 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
             </span>
           </Divider>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text type="secondary">Học viên sẽ được đưa vào quyết định này:</Text>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <Space>
+              <Text type="secondary">Học viên sẽ được đưa vào quyết định này:</Text>
+              <Input.Search
+                size="small"
+                placeholder="Tìm tên hoặc CCCD trong danh sách..."
+                allowClear
+                value={modalStudentSearch}
+                onChange={(e) => setModalStudentSearch(e.target.value)}
+                style={{ width: 240 }}
+              />
+            </Space>
             {!isLockedViewMode && (
               <Space>
                 <Button
@@ -3487,13 +3549,27 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           </div>
 
           <Table
-            dataSource={tempStudents}
+            dataSource={tempStudents.filter((s) => {
+              if (!modalStudentSearch.trim()) return true;
+              const q = modalStudentSearch.toLowerCase().trim();
+              return (
+                (s.fullName || '').toLowerCase().includes(q) ||
+                (s.cardNumber || '').toLowerCase().includes(q) ||
+                (s.studentCode || '').toLowerCase().includes(q)
+              );
+            })}
             rowKey={r => r.id}
             size="small"
-            pagination={{ pageSize: 8, size: 'small' }}
+            pagination={{ pageSize: 8, size: 'small', showTotal: (t) => `Tổng ${t} HV` }}
             locale={{ emptyText: 'Chưa có học viên nào. Nhấn "Thêm học viên" để thêm.' }}
             columns={[
-              { title: 'STT', width: 50, align: 'center', render: (_, __, i) => i + 1 },
+              {
+                title: 'STT',
+                width: 50,
+                align: 'center',
+                render: (_: any, r: StudentDetail) =>
+                  tempStudents.findIndex((s) => String(s.id) === String(r.id)) + 1,
+              },
               { title: 'Họ tên', dataIndex: 'fullName', render: (v: string) => <b>{v}</b> },
               {
                 title: 'Ngày sinh',
@@ -3540,10 +3616,17 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                 key: 'act',
                 width: 95,
                 align: 'center',
-                render: (_: any, r: StudentDetail, idx: number) => (
+                render: (_: any, r: StudentDetail) => (
                   <Space size={4}>
                     <Tooltip title="Sửa thông tin HV">
-                      <Button size="small" icon={<EditOutlined />} onClick={() => moSuaHocVien(r, idx)} />
+                      <Button
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => {
+                          const realIdx = tempStudents.findIndex((s) => String(s.id) === String(r.id));
+                          if (realIdx >= 0) moSuaHocVien(r, realIdx);
+                        }}
+                      />
                     </Tooltip>
                     {!isLockedViewMode && (
                       <Tooltip title="Xóa khỏi danh sách">
@@ -3551,7 +3634,10 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                           size="small"
                           danger
                           icon={<DeleteOutlined />}
-                          onClick={() => setTempStudents(prev => prev.filter((_, i) => i !== idx))}
+                          onClick={() => {
+                            setTempStudents((prev) => prev.filter((s) => String(s.id) !== String(r.id)));
+                            message.info(`Đã bỏ "${r.fullName}" khỏi danh sách (Nhấn "Lưu quyết định" để lưu)`);
+                          }}
                         />
                       </Tooltip>
                     )}
