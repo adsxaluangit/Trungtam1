@@ -124,7 +124,7 @@ export default function MauIn() {
   const loadTemplates = async () => {
     setLoading(true);
     try {
-      const res = await api<any>(`/${COLLECTIONS.PRINT_TEMPLATES}?publicationState=preview&pagination[limit]=100`);
+      const res = await api<any>(`/${COLLECTIONS.PRINT_TEMPLATES}?publicationState=preview&pagination[pageSize]=200`);
       const list = normalizeStrapiList(res);
       setTemplates(list);
     } catch (err: any) {

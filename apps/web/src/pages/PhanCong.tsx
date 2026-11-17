@@ -157,12 +157,12 @@ export default function PhanCong() {
     try {
       const [decsRes, teachersRes, subsRes, assignsRes] = await Promise.all([
         api<any>(
-          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[related_decision]=true&populate[students][count]=true&publicationState=preview&pagination[limit]=500`,
+          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[related_decision]=true&populate[students][count]=true&sort=signed_date:desc&publicationState=preview&pagination[pageSize]=1000`,
         ),
-        api<any>(`/${COLLECTIONS.TEACHERS}?populate=*&publicationState=preview&pagination[limit]=500`),
-        api<any>(`/${COLLECTIONS.SUBJECTS}?populate=*&publicationState=preview&pagination[limit]=500`),
+        api<any>(`/${COLLECTIONS.TEACHERS}?populate=*&publicationState=preview&pagination[pageSize]=1000`),
+        api<any>(`/${COLLECTIONS.SUBJECTS}?populate=*&publicationState=preview&pagination[pageSize]=1000`),
         api<any>(
-          `/${COLLECTIONS.TRAINING_ASSIGNMENTS}?populate[decision]=true&publicationState=preview&pagination[limit]=500`,
+          `/${COLLECTIONS.TRAINING_ASSIGNMENTS}?populate[decision]=true&publicationState=preview&pagination[pageSize]=1000`,
         ),
       ]);
 

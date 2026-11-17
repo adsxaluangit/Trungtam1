@@ -87,9 +87,9 @@ export default function NhapDiem() {
     try {
       const [decsRes, subsRes] = await Promise.all([
         api<any>(
-          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[related_decision]=true&populate[students][count]=true&publicationState=preview&pagination[limit]=500`,
+          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[related_decision]=true&populate[students][count]=true&sort=signed_date:desc&publicationState=preview&pagination[pageSize]=1000`,
         ),
-        api<any>(`/${COLLECTIONS.SUBJECTS}?populate=*&publicationState=preview&pagination[limit]=500`),
+        api<any>(`/${COLLECTIONS.SUBJECTS}?populate=*&publicationState=preview&pagination[pageSize]=1000`),
       ]);
 
       const allDecs = normalizeStrapiList(decsRes);
@@ -172,7 +172,7 @@ export default function NhapDiem() {
 
       // 2. Fetch all recognized student IDs to filter them out
       const recDecsRes = await api<any>(
-        `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=RECOGNITION&populate[students][fields][0]=id&populate[students][fields][1]=documentId&publicationState=preview&pagination[limit]=1000`,
+        `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=RECOGNITION&populate[students][fields][0]=id&populate[students][fields][1]=documentId&publicationState=preview&pagination[pageSize]=1000`,
       );
       const recDecs = normalizeStrapiList(recDecsRes);
       const recognizedIds = new Set<string>();

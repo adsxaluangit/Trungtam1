@@ -61,7 +61,7 @@ export default function TongQuan() {
         api<any>(`/students?pagination[pageSize]=1&publicationState=preview`),
         api<any>(`/teachers?pagination[pageSize]=1&publicationState=preview`),
         api<any>(
-          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[students][fields][0]=id&populate[related_decision]=true&sort=updatedAt:desc&pagination[pageSize]=300&publicationState=preview`,
+          `/${COLLECTIONS.CLASS_DECISIONS}?populate[school_class]=true&populate[students][fields][0]=id&populate[related_decision]=true&sort=updatedAt:desc&pagination[pageSize]=1000&publicationState=preview`,
         ),
       ]);
 
