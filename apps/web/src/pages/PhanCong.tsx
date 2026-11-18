@@ -171,16 +171,37 @@ export default function PhanCong() {
       const allSubjects = normalizeStrapiList(subsRes);
       const allAssigns = normalizeStrapiList(assignsRes);
 
-      // Build map of decisionId -> assignment
+      // Identify finalized opening decisions first (both documentId and numeric id)
+      const finalizedOpeningIds = new Set(
+        allDecs
+          .filter((d: any) => d.type === 'RECOGNITION')
+          .flatMap((d: any) => {
+            const rel = d.related_decision?.data || d.related_decision;
+            return [
+              String(rel?.documentId || ''),
+              String(rel?.strapiId || rel?.id || ''),
+            ];
+          })
+          .filter((id: string) => id !== ''),
+      );
+
+      // Build map of decisionId -> assignment (and occupancy only for active classes)
       const aMap: Record<string, any> = {};
       const occupancy: Record<string, Record<string, Record<string, string>>> = {};
 
       allAssigns.forEach((a: any) => {
         const decRel = a.decision?.data || a.decision;
-        const decId = String(decRel?.documentId || decRel?.id || '');
-        if (decId) aMap[decId] = a;
+        const decDocId = String(decRel?.documentId || '');
+        const decNumId = String(decRel?.strapiId || decRel?.id || '');
+        const decId = decDocId || decNumId;
+        if (decDocId) aMap[decDocId] = a;
+        if (decNumId) aMap[decNumId] = a;
 
-        if (Array.isArray(a.schedule)) {
+        const isFinalized =
+          (decDocId && finalizedOpeningIds.has(decDocId)) ||
+          (decNumId && finalizedOpeningIds.has(decNumId));
+
+        if (!isFinalized && Array.isArray(a.schedule)) {
           a.schedule.forEach((row: any) => {
             if (row.date && row.shift && row.teacherId) {
               const d = row.date;
@@ -204,17 +225,6 @@ export default function PhanCong() {
       setGlobalOccupancy(occupancy);
       setTeachers(allTeachers);
       setSubjects(allSubjects);
-
-      // Identify finalized opening decisions
-      const finalizedOpeningIds = new Set(
-        allDecs
-          .filter((d: any) => d.type === 'RECOGNITION')
-          .map((d: any) => {
-            const rel = d.related_decision;
-            return String(rel?.documentId || rel?.id || '');
-          })
-          .filter((id: string) => id !== ''),
-      );
 
       // Filter OPENING decisions that are active
       const validDecs = allDecs
@@ -461,11 +471,13 @@ export default function PhanCong() {
       }
     });
 
-    // Subject teacher cache (1 teacher = 1 subject in the same course)
-    const courseTeacherSubject: Record<string, string> = {};
+    // Lưu giảng viên đang dạy từng môn trong lớp để ưu tiên giữ 1 GV cho các buổi của cùng 1 môn
+    // (nhưng 1 giảng viên hoàn toàn có thể dạy nhiều môn khác nhau trong cùng lớp và nhiều lớp)
+    const subjectTeacherPreference: Record<string, string> = {};
     currentRows.forEach((r) => {
-      if (r.teacherId && r.subjectId) {
-        courseTeacherSubject[String(r.teacherId)] = String(r.subjectId);
+      if (r.teacherId && (r.subjectId || r.subjectName)) {
+        const key = String(r.subjectId || r.subjectName);
+        subjectTeacherPreference[key] = String(r.teacherId);
       }
     });
 
@@ -476,43 +488,26 @@ export default function PhanCong() {
 
       const subId = row.subjectId;
       if (!subId && !row.subjectName) continue;
+      const subKey = String(subId || row.subjectName);
 
       const qualified = teachers.filter((t) => teacherCanTeachSubject(t, subId, row.subjectName));
       const available = qualified.filter((t) => {
         const tId = String(t.documentId || t.id);
-        if (courseTeacherSubject[tId] && !matchSubject(courseTeacherSubject[tId], subId, row.subjectName)) {
-          return false;
-        }
         if (busyShift[row.date]?.[row.shift]?.has(tId)) return false;
-
-        // Check sessions count in day (max 2)
-        const dayOcc = busyShift[row.date] || {};
-        let dayCount = 0;
-        if (dayOcc['Sáng']?.has(tId)) dayCount++;
-        if (dayOcc['Chiều']?.has(tId)) dayCount++;
-        if (dayOcc['Tối']?.has(tId)) dayCount++;
-        if (dayCount >= 2) return false;
-
         return true;
       });
 
-      // Sort: prefer teacher already assigned to this subject
+      // Ưu tiên giảng viên đang dạy các buổi khác của chính môn học này
       available.sort((a, b) => {
         const aId = String(a.documentId || a.id);
         const bId = String(b.documentId || b.id);
-        const aMatch =
-          courseTeacherSubject[aId] && matchSubject(courseTeacherSubject[aId], subId, row.subjectName)
-            ? 1
-            : 0;
-        const bMatch =
-          courseTeacherSubject[bId] && matchSubject(courseTeacherSubject[bId], subId, row.subjectName)
-            ? 1
-            : 0;
+        const aMatch = subjectTeacherPreference[subKey] === aId ? 1 : 0;
+        const bMatch = subjectTeacherPreference[subKey] === bId ? 1 : 0;
         return bMatch - aMatch;
       });
 
-      if (available.length > 0) {
-        const picked = available[0];
+      const picked = available[0] || qualified[0];
+      if (picked) {
         const tId = String(picked.documentId || picked.id);
         currentRows[i] = {
           ...row,
@@ -520,7 +515,7 @@ export default function PhanCong() {
           teacherName: picked.full_name || picked.name || '',
           isAutoFilled: true,
         };
-        courseTeacherSubject[tId] = subId;
+        subjectTeacherPreference[subKey] = tId;
         if (!busyShift[row.date]) busyShift[row.date] = {};
         if (!busyShift[row.date][row.shift]) busyShift[row.date][row.shift] = new Set();
         busyShift[row.date][row.shift].add(tId);
@@ -1295,7 +1290,6 @@ export default function PhanCong() {
                 const options = qualifiedTeachers
                   .map((t) => {
                     const tId = String(t.documentId || t.id);
-                    const isCurrentSelected = isSameTeacher(t, record.teacherId);
                     const isBusyOtherClass = isTeacherBusyOtherDecision(
                       record.date,
                       record.shift,
@@ -1308,50 +1302,18 @@ export default function PhanCong() {
                         r.shift === record.shift &&
                         isSameTeacher(t, r.teacherId),
                     );
-                    const teachingOtherSubInCourse = assignmentRows.some(
-                      (r, rIdx) =>
-                        rIdx !== idx &&
-                        isSameTeacher(t, r.teacherId) &&
-                        r.subjectId &&
-                        record.subjectId &&
-                        !matchSubject(r.subjectId, record.subjectId, record.subjectName),
-                    );
 
-                    // Đếm số ca dạy trong ngày của giảng viên
-                    const busyShiftsInDay = new Set<string>();
-                    ['Sáng', 'Chiều', 'Tối'].forEach((sh) => {
-                      if (isTeacherBusyOtherDecision(record.date, sh, tId)) {
-                        busyShiftsInDay.add(sh);
-                      }
-                    });
-                    assignmentRows.forEach((r, rIdx) => {
-                      if (rIdx !== idx && r.date === record.date && isSameTeacher(t, r.teacherId)) {
-                        busyShiftsInDay.add(r.shift);
-                      }
-                    });
-                    const tooManyShifts =
-                      !busyShiftsInDay.has(record.shift) && busyShiftsInDay.size >= 2;
-
-                    const disabled =
-                      !isCurrentSelected &&
-                      (isBusyOtherClass ||
-                        isBusySameSlot ||
-                        teachingOtherSubInCourse ||
-                        tooManyShifts);
-
-                    let reason = '';
-                    if (isBusyOtherClass) reason = ' (Bận lớp khác ca này)';
-                    else if (isBusySameSlot) reason = ' (Trùng ca trong lớp)';
-                    else if (teachingOtherSubInCourse) reason = ' (Đã dạy môn khác của lớp)';
-                    else if (tooManyShifts) reason = ' (Đã đủ 2 ca/ngày)';
+                    let note = '';
+                    if (isBusySameSlot) note = ' (Trùng ca trong lớp)';
+                    else if (isBusyOtherClass) note = ' (Có tiết lớp khác ca này)';
 
                     return {
                       value: tId,
-                      label: `${t.full_name || t.name}${reason}`,
-                      disabled,
+                      label: `${t.full_name || t.name}${note}`,
+                      hasNote: Boolean(note),
                     };
                   })
-                  .sort((a, b) => Number(a.disabled) - Number(b.disabled));
+                  .sort((a, b) => Number(a.hasNote) - Number(b.hasNote));
 
                 return (
                   <Select
