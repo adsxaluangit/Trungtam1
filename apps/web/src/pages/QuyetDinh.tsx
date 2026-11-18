@@ -207,10 +207,32 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     queryKey: ['opening-decisions-for-recognition'],
     enabled: !isOpening,
     queryFn: async () => {
-      const res = await api<any>(
-        `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=OPENING&populate[school_class]=true&pagination[pageSize]=1000&publicationState=preview`,
-      );
-      return normalizeStrapiList(res);
+      const [openRes, recRes] = await Promise.all([
+        api<any>(
+          `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=OPENING&populate[school_class]=true&sort=signed_date:desc&pagination[pageSize]=1000&publicationState=preview`,
+        ),
+        api<any>(
+          `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=RECOGNITION&populate[related_decision]=true&pagination[pageSize]=1000&publicationState=preview`,
+        ),
+      ]);
+      const openList = normalizeStrapiList(openRes);
+      const recList = normalizeStrapiList(recRes);
+
+      const finalizedIds = new Set<string>();
+      recList.forEach((r: any) => {
+        const rel = r.related_decision?.data || r.related_decision;
+        if (rel?.documentId) finalizedIds.add(String(rel.documentId));
+        if (rel?.strapiId) finalizedIds.add(String(rel.strapiId));
+        if (rel?.id) finalizedIds.add(String(rel.id));
+      });
+
+      return openList.map((d: any) => ({
+        ...d,
+        _isFinalized:
+          finalizedIds.has(String(d.documentId || '')) ||
+          finalizedIds.has(String(d.strapiId || '')) ||
+          finalizedIds.has(String(d.id || '')),
+      }));
     },
   });
 
@@ -447,6 +469,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     onSuccess: () => {
       message.success('Đã xóa quyết định');
       qc.invalidateQueries({ queryKey: ['decisions-list'] });
+      qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
       qc.invalidateQueries({ queryKey: ['students-list'] });
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
     },
@@ -3441,9 +3464,10 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
               <Col xs={24} md={12}>
                 <Form.Item name="relatedOpeningId" label="QĐ Mở lớp liên kết">
                   <Select
-                    placeholder="Chọn QĐ mở lớp..."
+                    placeholder="Chọn QĐ mở lớp (chưa có QĐ công nhận)..."
                     showSearch
                     optionFilterProp="label"
+                    popupMatchSelectWidth={false}
                     allowClear
                     disabled={isLockedViewMode}
                     onChange={async (v) => {
@@ -3458,7 +3482,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                             setLopDuocChon(clsId);
                             form.setFieldValue('classId', clsId);
                           }
-                          if (relDec.training_course && !form.getFieldValue('training_course')) {
+                          if (relDec.training_course) {
                             form.setFieldValue('training_course', relDec.training_course);
                           }
                         }
@@ -3470,10 +3494,18 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                         }
                       }
                     }}
-                    options={danhSachQdMoLop?.map((d: any) => ({
-                      value: d.documentId || d.id,
-                      label: `${d.decision_number} – ${d.school_class?.name || ''}`,
-                    }))}
+                    options={(danhSachQdMoLop || [])
+                      .filter(
+                        (d: any) =>
+                          !d._isFinalized ||
+                          (editingItem &&
+                            (String(d.documentId || d.id) === String(relatedOpeningId) ||
+                              String(d.strapiId) === String(relatedOpeningId))),
+                      )
+                      .map((d: any) => ({
+                        value: d.documentId || d.id,
+                        label: `${d.decision_number} – ${d.school_class?.name || ''}${d.training_course ? ` (${d.training_course})` : ''}`,
+                      }))}
                   />
                 </Form.Item>
               </Col>
