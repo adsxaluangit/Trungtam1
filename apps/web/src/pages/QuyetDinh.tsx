@@ -341,21 +341,38 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   };
 
   // ============================================================
-  // Kiểm tra trùng Khóa / Đợt đào tạo (cho Quyết định mở lớp)
+  // Kiểm tra trùng Khóa / Đợt đào tạo trong CÙNG LỚP HỌC (cho Quyết định mở lớp)
+  // Khác lớp học vẫn được đặt cùng tên Khóa / Đợt bình thường
   // ============================================================
   const checkDuplicateTrainingCourse = async (
     rawCourse?: string,
     showToast = true,
+    overrideClassId?: string,
   ): Promise<string | null> => {
     if (!isOpening) {
       setDupCourseWarning(null);
       return null;
     }
     const courseVal = (rawCourse ?? form.getFieldValue('training_course') ?? '').trim();
+    const activeClassId =
+      overrideClassId ??
+      form.getFieldValue('classId') ??
+      lopDuocChon ??
+      editingItem?.school_class?.documentId ??
+      editingItem?.school_class?.id;
+
     if (!courseVal) {
       setDupCourseWarning(null);
       return null;
     }
+
+    const activeClsObj = danhSachLop?.find(
+      (c: any) =>
+        String(c.documentId) === String(activeClassId) ||
+        String(c.id) === String(activeClassId) ||
+        String(c.strapiId) === String(activeClassId),
+    );
+
     try {
       const res = await api<any>(
         `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=OPENING&filters[training_course][$eqi]=${encodeURIComponent(courseVal)}&populate[school_class]=true&publicationState=preview&pagination[pageSize]=50`,
@@ -364,12 +381,29 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       const currentEditId = editingItem ? String(editingItem.documentId || editingItem.id) : '';
       const matched = list.find((d: any) => {
         if (currentEditId && String(d.documentId || d.id) === currentEditId) return false;
-        return String(d.training_course || '').trim().toLowerCase() === courseVal.toLowerCase();
+        const sameCourse =
+          String(d.training_course || '').trim().toLowerCase() === courseVal.toLowerCase();
+        if (!sameCourse) return false;
+
+        // Chỉ tính là trùng khi CÙNG LỚP HỌC (khác lớp học vẫn được phép đặt trùng tên Khóa/Đợt)
+        if (activeClassId) {
+          const dCls = d.school_class?.data || d.school_class || {};
+          const dClsDocId = String(dCls.documentId || dCls.id || '');
+          const dClsNumId = String(dCls.strapiId || dCls.id || '');
+          const matchSameClass =
+            dClsDocId === String(activeClassId) ||
+            dClsNumId === String(activeClassId) ||
+            (activeClsObj &&
+              (dClsDocId === String(activeClsObj.documentId) ||
+                dClsNumId === String(activeClsObj.strapiId)));
+          return matchSameClass;
+        }
+        return true;
       });
       if (matched) {
         const clsName = matched.school_class?.data?.name || matched.school_class?.name || '';
         const signedStr = matched.signed_date ? fmtNgay(matched.signed_date) : '';
-        const warnMsg = `Khóa/Đợt đào tạo "${courseVal}" đã tồn tại ở Quyết định mở lớp số "${matched.decision_number || '---'}"${clsName ? ` (Lớp: ${clsName})` : ''}${signedStr ? ` ký ngày ${signedStr}` : ''}!`;
+        const warnMsg = `Lớp "${clsName || 'này'}" đã có Khóa/Đợt đào tạo "${courseVal}" ở Quyết định mở lớp số "${matched.decision_number || '---'}"${signedStr ? ` (ký ngày ${signedStr})` : ''}!`;
         setDupCourseWarning(warnMsg);
         if (showToast) {
           message.warning(warnMsg, 5);
@@ -389,7 +423,11 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   const luuMut = useMutation({
     mutationFn: async (values: any) => {
       if (isOpening && values.training_course?.trim()) {
-        const dupCourseErr = await checkDuplicateTrainingCourse(values.training_course, false);
+        const dupCourseErr = await checkDuplicateTrainingCourse(
+          values.training_course,
+          false,
+          values.classId,
+        );
         if (dupCourseErr) {
           throw new Error(dupCourseErr + ' Vui lòng kiểm tra lại.');
         }
@@ -3463,6 +3501,9 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                   disabled={isLockedViewMode}
                   onChange={async (v) => {
                     setLopDuocChon(v);
+                    if (isOpening && form.getFieldValue('training_course')?.trim()) {
+                      checkDuplicateTrainingCourse(form.getFieldValue('training_course'), true, v);
+                    }
                     if (isOpening && !editingItem && v) {
                       try {
                         const clsObj = danhSachLop?.find(
