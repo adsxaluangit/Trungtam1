@@ -100,6 +100,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   const [modalStudentSearch, setModalStudentSearch] = useState('');
   const [lopDuocChon, setLopDuocChon] = useState<string | null>(null);
   const [relatedOpeningId, setRelatedOpeningId] = useState<string>('');
+  const [dupCourseWarning, setDupCourseWarning] = useState<string | null>(null);
 
   // Student picker modal
   const [moPickerModal, setMoPickerModal] = useState(false);
@@ -340,10 +341,60 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   };
 
   // ============================================================
+  // Kiểm tra trùng Khóa / Đợt đào tạo (cho Quyết định mở lớp)
+  // ============================================================
+  const checkDuplicateTrainingCourse = async (
+    rawCourse?: string,
+    showToast = true,
+  ): Promise<string | null> => {
+    if (!isOpening) {
+      setDupCourseWarning(null);
+      return null;
+    }
+    const courseVal = (rawCourse ?? form.getFieldValue('training_course') ?? '').trim();
+    if (!courseVal) {
+      setDupCourseWarning(null);
+      return null;
+    }
+    try {
+      const res = await api<any>(
+        `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=OPENING&filters[training_course][$eqi]=${encodeURIComponent(courseVal)}&populate[school_class]=true&publicationState=preview&pagination[pageSize]=50`,
+      );
+      const list = normalizeStrapiList(res);
+      const currentEditId = editingItem ? String(editingItem.documentId || editingItem.id) : '';
+      const matched = list.find((d: any) => {
+        if (currentEditId && String(d.documentId || d.id) === currentEditId) return false;
+        return String(d.training_course || '').trim().toLowerCase() === courseVal.toLowerCase();
+      });
+      if (matched) {
+        const clsName = matched.school_class?.data?.name || matched.school_class?.name || '';
+        const signedStr = matched.signed_date ? fmtNgay(matched.signed_date) : '';
+        const warnMsg = `Khóa/Đợt đào tạo "${courseVal}" đã tồn tại ở Quyết định mở lớp số "${matched.decision_number || '---'}"${clsName ? ` (Lớp: ${clsName})` : ''}${signedStr ? ` ký ngày ${signedStr}` : ''}!`;
+        setDupCourseWarning(warnMsg);
+        if (showToast) {
+          message.warning(warnMsg, 5);
+        }
+        return warnMsg;
+      }
+    } catch {
+      // ignore
+    }
+    setDupCourseWarning(null);
+    return null;
+  };
+
+  // ============================================================
   // 4. Mutation Lưu Quyết định
   // ============================================================
   const luuMut = useMutation({
     mutationFn: async (values: any) => {
+      if (isOpening && values.training_course?.trim()) {
+        const dupCourseErr = await checkDuplicateTrainingCourse(values.training_course, false);
+        if (dupCourseErr) {
+          throw new Error(dupCourseErr + ' Vui lòng kiểm tra lại.');
+        }
+      }
+
       const cls = danhSachLop?.find(
         (c: any) =>
           String(c.documentId) === String(values.classId) ||
@@ -447,6 +498,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       setModalStudentSearch('');
       setLopDuocChon(null);
       setRelatedOpeningId('');
+      setDupCourseWarning(null);
       setIsLockedViewMode(false);
       setExpandedStudents({});
       qc.invalidateQueries({ queryKey: ['decisions-list'] });
@@ -489,6 +541,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setModalStudentSearch('');
     setLopDuocChon(null);
     setRelatedOpeningId('');
+    setDupCourseWarning(null);
     form.setFieldsValue({
       signed_date: dayjs(),
       signer_name: 'HIỆU TRƯỞNG',
@@ -506,6 +559,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setModalStudentSearch('');
     setLopDuocChon(null);
     setRelatedOpeningId('');
+    setDupCourseWarning(null);
     form.resetFields();
 
     const cls = item.school_class;
@@ -3511,8 +3565,30 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
               </Col>
             )}
             <Col xs={24} md={isOpening ? 10 : 24}>
-              <Form.Item name="training_course" label="Khóa / Đợt đào tạo">
-                <Input placeholder="Vd: Đợt 1 năm 2026" disabled={isLockedViewMode} />
+              <Form.Item
+                name="training_course"
+                label="Khóa / Đợt đào tạo"
+                validateStatus={isOpening && dupCourseWarning ? 'warning' : undefined}
+                help={
+                  isOpening && dupCourseWarning ? (
+                    <span style={{ color: '#d97706', fontWeight: 500, fontSize: 12 }}>
+                      ⚠️ {dupCourseWarning}
+                    </span>
+                  ) : undefined
+                }
+              >
+                <Input
+                  placeholder="Vd: BTC K33/2026"
+                  disabled={isLockedViewMode}
+                  onChange={() => {
+                    if (dupCourseWarning) setDupCourseWarning(null);
+                  }}
+                  onBlur={(e) => {
+                    if (isOpening) {
+                      checkDuplicateTrainingCourse(e.target.value, true);
+                    }
+                  }}
+                />
               </Form.Item>
             </Col>
           </Row>
