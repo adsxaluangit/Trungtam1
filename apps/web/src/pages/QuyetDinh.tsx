@@ -4218,7 +4218,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                 { title: 'Môn học', dataIndex: 'name', render: (v: string) => <b>{v}</b> },
                 {
                   title: 'Điểm Lý thuyết / 4 Kỹ năng',
-                  width: 240,
+                  width: 260,
                   align: 'center',
                   render: (_: any, subj: any) => {
                     const k1 = String(subj.strapiId || subj.id);
@@ -4244,19 +4244,23 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                       const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
                       if (hasAny4) {
                         const hasAll4 = !isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w);
-                        const avg = hasAll4 ? ((l + sp + r + w) / 4).toFixed(1) : null;
-                        const isPass = hasAll4 && l >= 5 && sp >= 5 && r >= 5 && w >= 5;
+                        const hasFailed =
+                          (!isNaN(l) && l < 10) ||
+                          (!isNaN(sp) && sp < 10) ||
+                          (!isNaN(r) && r < 20) ||
+                          (!isNaN(w) && w < 10);
+                        const isPass = hasAll4 && !hasFailed;
                         return (
-                          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                          <div style={{ fontSize: 12, lineHeight: 1.6 }}>
                             <div>
-                              Nghe: <b>{g.listening || '-'}</b> | Nói: <b>{g.speaking || '-'}</b> | Đọc:{' '}
-                              <b>{g.reading || '-'}</b> | Viết: <b>{g.writing || '-'}</b>
+                              Nghe: <b>{g.listening ?? '-'}</b>/20 | Nói: <b>{g.speaking ?? '-'}</b>/20 | Đọc:{' '}
+                              <b>{g.reading ?? '-'}</b>/40 | Viết: <b>{g.writing ?? '-'}</b>/20
                             </div>
-                            {avg && (
+                            {(hasAll4 || hasFailed) && (
                               <div>
-                                TB: <b>{avg}</b>{' '}
+                                Kết quả:{' '}
                                 <Tag color={isPass ? 'success' : 'error'} style={{ marginLeft: 4 }}>
-                                  {isPass ? 'Đạt' : 'Chưa đạt'}
+                                  {isPass ? 'Đạt' : 'Không đạt'}
                                 </Tag>
                               </div>
                             )}

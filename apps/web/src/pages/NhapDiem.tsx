@@ -96,36 +96,51 @@ export function evaluateSubjectGrade(
     const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
     const hasAll4 = !isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w);
 
+    // Thang điểm Tiếng Anh: Nghe 20 (>=10), Nói 20 (>=10), Đọc 40 (>=20), Viết 20 (>=10)
+    // Một trong bốn điểm nhỏ hơn 50% thì Kết quả là Không đạt
     const failedSkills: string[] = [];
-    if (!isNaN(l) && l < 5) failedSkills.push('Nghe');
-    if (!isNaN(sp) && sp < 5) failedSkills.push('Nói');
-    if (!isNaN(r) && r < 5) failedSkills.push('Đọc');
-    if (!isNaN(w) && w < 5) failedSkills.push('Viết');
+    if (!isNaN(l) && l < 10) failedSkills.push('Nghe < 10/20');
+    if (!isNaN(sp) && sp < 10) failedSkills.push('Nói < 10/20');
+    if (!isNaN(r) && r < 20) failedSkills.push('Đọc < 20/40');
+    if (!isNaN(w) && w < 10) failedSkills.push('Viết < 10/20');
+
+    if (failedSkills.length > 0) {
+      return {
+        summary: 'Không đạt',
+        isPass: false,
+        failedSkills,
+      };
+    }
 
     if (hasAll4) {
-      const avg = (l + sp + r + w) / 4;
-      // Cả 4 điểm Nghe, Nói, Đọc, Viết đều phải >= 5.0 mới Đạt
-      const isPass = l >= 5 && sp >= 5 && r >= 5 && w >= 5;
       return {
-        summary: avg.toFixed(1),
-        isPass,
-        failedSkills,
+        summary: 'Đạt',
+        isPass: true,
+        failedSkills: [],
       };
     }
 
     // Tương thích ngược với các lớp cũ nếu trước đây mới chỉ nhập 1 cột điểm theory
     if (!hasAny4) {
-      const t = parseFloat(grade.theory);
+      const rawTheory = String(grade.theory || '').trim();
+      if (rawTheory === 'Đạt') {
+        return { summary: 'Đạt', isPass: true, failedSkills: [] };
+      }
+      if (rawTheory === 'Không đạt' || rawTheory === 'Chưa đạt') {
+        return { summary: 'Không đạt', isPass: false, failedSkills: [] };
+      }
+      const t = parseFloat(rawTheory);
       if (!isNaN(t)) {
+        const passLegacy = t >= 5;
         return {
-          summary: t.toFixed(1),
-          isPass: t >= 5,
-          failedSkills: t < 5 ? ['Điểm < 5.0'] : [],
+          summary: passLegacy ? 'Đạt' : 'Không đạt',
+          isPass: passLegacy,
+          failedSkills: passLegacy ? [] : ['Điểm < 50%'],
         };
       }
     }
 
-    return { summary: '', isPass: false, failedSkills };
+    return { summary: '', isPass: false, failedSkills: [] };
   }
 
   const t = parseFloat(grade.theory);
@@ -369,13 +384,29 @@ export default function NhapDiem() {
     const sp = parseFloat(g.speaking ?? '');
     const r = parseFloat(g.reading ?? '');
     const w = parseFloat(g.writing ?? '');
-    if (!isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w)) {
+    const hasFailed =
+      (!isNaN(l) && l < 10) ||
+      (!isNaN(sp) && sp < 10) ||
+      (!isNaN(r) && r < 20) ||
+      (!isNaN(w) && w < 10);
+    const hasAll4 = !isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w);
+
+    if (hasFailed) {
       return {
         ...g,
-        theory: ((l + sp + r + w) / 4).toFixed(1),
+        theory: 'Không đạt',
       };
     }
-    return g;
+    if (hasAll4) {
+      return {
+        ...g,
+        theory: 'Đạt',
+      };
+    }
+    return {
+      ...g,
+      theory: '',
+    };
   };
 
   const handleGradeChange = (studentCode: string, type: GradeField, value: string) => {
@@ -438,16 +469,23 @@ export default function NhapDiem() {
   };
 
   const handleBatchApplyLT = () => {
-    const val = parseFloat(batchLT);
-    if (isNaN(val) || val < 0 || val > 10) {
-      message.warning('Nhập điểm hợp lệ (0-10)');
-      return;
-    }
     if (!selectedSubjectId) return;
     const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
     const subKey = String(curSub?.strapiId || selectedSubjectId);
     const curSubGrades = { ...(inputGrades[subKey] || {}) };
     const isFour = isFourSkillsSubject(curSub);
+    const val = parseFloat(batchLT);
+
+    if (isFour) {
+      const maxAllowed = batchSkillTarget === 'reading' ? 40 : 20;
+      if (isNaN(val) || val < 0 || val > maxAllowed) {
+        message.warning(`Nhập điểm hợp lệ (0-${maxAllowed})`);
+        return;
+      }
+    } else if (isNaN(val) || val < 0 || val > 10) {
+      message.warning('Nhập điểm hợp lệ (0-10)');
+      return;
+    }
 
     decisionStudents.forEach((s) => {
       const current = curSubGrades[s.studentCode] || { theory: '', practice: '' };
@@ -458,7 +496,7 @@ export default function NhapDiem() {
             ...updated,
             listening: String(val),
             speaking: String(val),
-            reading: String(val),
+            reading: String(val * 2),
             writing: String(val),
           };
         } else {
@@ -475,7 +513,9 @@ export default function NhapDiem() {
     setInputGrades({ ...inputGrades, [subKey]: curSubGrades });
     message.success(
       isFour
-        ? `Đã áp dụng điểm ${val} cho tất cả học viên`
+        ? batchSkillTarget === 'all4'
+          ? `Đã áp dụng Nghe/Nói/Viết = ${val}, Đọc = ${val * 2} cho tất cả học viên`
+          : `Đã áp dụng điểm ${val} cho tất cả học viên`
         : `Đã áp dụng điểm LT ${val} cho tất cả học viên`,
     );
   };
@@ -515,14 +555,13 @@ export default function NhapDiem() {
 
       if (isFour) {
         if (app.theoryApproved) {
-          curSubGrades[s.studentCode] = {
+          curSubGrades[s.studentCode] = syncFourSkillsTheory({
             ...current,
             listening: String(score),
             speaking: String(score),
-            reading: String(score),
+            reading: String(score * 2),
             writing: String(score),
-            theory: String(score.toFixed(1)),
-          };
+          });
         }
       } else {
         curSubGrades[s.studentCode] = {
@@ -537,7 +576,11 @@ export default function NhapDiem() {
       ...inputGrades,
       [subKey]: curSubGrades,
     });
-    message.success(`Đã điền nhanh điểm ${score} cho các học viên đủ điều kiện!`);
+    message.success(
+      isFour
+        ? `Đã điền nhanh Nghe/Nói/Viết = ${score}, Đọc = ${score * 2} cho học viên đủ điều kiện!`
+        : `Đã điền nhanh điểm ${score} cho các học viên đủ điều kiện!`,
+    );
   };
 
   const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
@@ -559,12 +602,11 @@ export default function NhapDiem() {
         { header: 'Mã HV', key: 'studentCode', width: 16 },
         { header: 'Họ và tên', key: 'fullName', width: 26 },
         { header: 'Ngày sinh', key: 'dob', width: 13 },
-        { header: 'Nghe', key: 'listening', width: 10 },
-        { header: 'Nói', key: 'speaking', width: 10 },
-        { header: 'Đọc', key: 'reading', width: 10 },
-        { header: 'Viết', key: 'writing', width: 10 },
-        { header: 'Tổng kết', key: 'summary', width: 11 },
-        { header: 'Kết quả', key: 'result', width: 13 },
+        { header: 'Nghe (20)', key: 'listening', width: 12 },
+        { header: 'Nói (20)', key: 'speaking', width: 12 },
+        { header: 'Đọc (40)', key: 'reading', width: 12 },
+        { header: 'Viết (20)', key: 'writing', width: 12 },
+        { header: 'Kết quả', key: 'result', width: 14 },
       ];
     } else {
       ws.columns = [
@@ -602,8 +644,7 @@ export default function NhapDiem() {
             speaking: g.speaking ?? '',
             reading: g.reading ?? '',
             writing: g.writing ?? '',
-            summary,
-            result: summary ? (isPass ? 'Đạt' : 'Chưa đạt') : '',
+            result: summary ? (isPass ? 'Đạt' : 'Không đạt') : '',
           }
         : {
             stt: idx + 1,
@@ -670,8 +711,7 @@ export default function NhapDiem() {
               <td style="text-align:center;">${g.speaking ?? ''}</td>
               <td style="text-align:center;">${g.reading ?? ''}</td>
               <td style="text-align:center;">${g.writing ?? ''}</td>
-              <td style="text-align:center;"><b>${summary}</b></td>
-              <td style="text-align:center;">${summary ? (isPass ? 'Đạt' : 'Chưa đạt') : ''}</td>
+              <td style="text-align:center;"><b>${summary ? (isPass ? 'Đạt' : 'Không đạt') : ''}</b></td>
             </tr>
           `;
         }
@@ -698,12 +738,11 @@ export default function NhapDiem() {
           <th style="width:105px;">Mã HV</th>
           <th>Họ và tên</th>
           <th style="width:90px;">Ngày sinh</th>
-          <th style="width:58px;">Nghe</th>
-          <th style="width:58px;">Nói</th>
-          <th style="width:58px;">Đọc</th>
-          <th style="width:58px;">Viết</th>
-          <th style="width:68px;">Tổng kết</th>
-          <th style="width:82px;">Kết quả</th>
+          <th style="width:65px;">Nghe (20)</th>
+          <th style="width:65px;">Nói (20)</th>
+          <th style="width:65px;">Đọc (40)</th>
+          <th style="width:65px;">Viết (20)</th>
+          <th style="width:90px;">Kết quả</th>
         </tr>
       `
       : `
@@ -888,11 +927,16 @@ export default function NhapDiem() {
     );
   }
 
-  const fourSkillDefs: { key: 'listening' | 'speaking' | 'reading' | 'writing'; label: string }[] = [
-    { key: 'listening', label: 'Nghe (0-10)' },
-    { key: 'speaking', label: 'Nói (0-10)' },
-    { key: 'reading', label: 'Đọc (0-10)' },
-    { key: 'writing', label: 'Viết (0-10)' },
+  const fourSkillDefs: {
+    key: 'listening' | 'speaking' | 'reading' | 'writing';
+    label: string;
+    max: number;
+    passMin: number;
+  }[] = [
+    { key: 'listening', label: 'Nghe (0-20)', max: 20, passMin: 10 },
+    { key: 'speaking', label: 'Nói (0-20)', max: 20, passMin: 10 },
+    { key: 'reading', label: 'Đọc (0-40)', max: 40, passMin: 20 },
+    { key: 'writing', label: 'Viết (0-20)', max: 20, passMin: 10 },
   ];
 
   return (
@@ -956,7 +1000,7 @@ export default function NhapDiem() {
               </Select>
               {isFourSkills && (
                 <Tag color="purple">
-                  Chấm 4 kỹ năng: Nghe • Nói • Đọc • Viết (Đạt khi cả 4 kỹ năng ≥ 5.0)
+                  Thang điểm: Nghe 20 • Nói 20 • Đọc 40 • Viết 20 (Mỗi phần ≥ 50% mới Đạt)
                 </Tag>
               )}
             </Space>
@@ -964,22 +1008,28 @@ export default function NhapDiem() {
           <Col xs={24} md={12} style={{ textAlign: 'right' }}>
             <Space wrap>
               <Text type="secondary" style={{ fontSize: 13 }}>Điền nhanh:</Text>
-              <Button size="small" onClick={() => handleQuickFillScores(7)}>7.0</Button>
-              <Button size="small" onClick={() => handleQuickFillScores(8)}>8.0</Button>
-              <Button size="small" onClick={() => handleQuickFillScores(9)}>9.0</Button>
               {isFourSkills ? (
                 <>
+                  <Button size="small" onClick={() => handleQuickFillScores(10)}>
+                    50% (10-10-20-10)
+                  </Button>
+                  <Button size="small" onClick={() => handleQuickFillScores(15)}>
+                    75% (15-15-30-15)
+                  </Button>
+                  <Button size="small" onClick={() => handleQuickFillScores(17)}>
+                    85% (17-17-34-17)
+                  </Button>
                   <Select
                     size="small"
                     value={batchSkillTarget}
                     onChange={(v) => setBatchSkillTarget(v)}
-                    style={{ width: 125 }}
+                    style={{ width: 155 }}
                     options={[
-                      { value: 'all4', label: 'Cả 4 kỹ năng' },
-                      { value: 'listening', label: 'Điểm Nghe' },
-                      { value: 'speaking', label: 'Điểm Nói' },
-                      { value: 'reading', label: 'Điểm Đọc' },
-                      { value: 'writing', label: 'Điểm Viết' },
+                      { value: 'all4', label: 'Cả 4 phần (Đọc x2)' },
+                      { value: 'listening', label: 'Điểm Nghe (0-20)' },
+                      { value: 'speaking', label: 'Điểm Nói (0-20)' },
+                      { value: 'reading', label: 'Điểm Đọc (0-40)' },
+                      { value: 'writing', label: 'Điểm Viết (0-20)' },
                     ]}
                   />
                   <Input
@@ -995,6 +1045,9 @@ export default function NhapDiem() {
                 </>
               ) : (
                 <>
+                  <Button size="small" onClick={() => handleQuickFillScores(7)}>7.0</Button>
+                  <Button size="small" onClick={() => handleQuickFillScores(8)}>8.0</Button>
+                  <Button size="small" onClick={() => handleQuickFillScores(9)}>9.0</Button>
                   <Input
                     size="small"
                     placeholder="LT"
@@ -1065,7 +1118,7 @@ export default function NhapDiem() {
             ...(isFourSkills
               ? fourSkillDefs.map((sk) => ({
                   title: sk.label,
-                  width: 115,
+                  width: 118,
                   align: 'center' as const,
                   render: (_: any, record: StudentItem) => {
                     const app = curSubApprovals[record.studentCode] || {
@@ -1076,17 +1129,17 @@ export default function NhapDiem() {
                     const disabled = !app.theoryApproved;
                     const rawVal = g[sk.key];
                     const numVal = rawVal !== undefined && rawVal !== '' ? parseFloat(rawVal) : null;
-                    const isBelowPass = numVal !== null && !isNaN(numVal) && numVal < 5;
+                    const isBelowPass = numVal !== null && !isNaN(numVal) && numVal < sk.passMin;
 
                     return (
                       <InputNumber
                         min={0}
-                        max={10}
+                        max={sk.max}
                         step={0.5}
                         precision={1}
                         disabled={disabled}
                         status={isBelowPass ? 'error' : undefined}
-                        placeholder={disabled ? 'Khóa' : '0-10'}
+                        placeholder={disabled ? 'Khóa' : `0-${sk.max}`}
                         value={numVal !== null && !isNaN(numVal) ? numVal : null}
                         onChange={(val) =>
                           handleGradeChange(
@@ -1169,22 +1222,36 @@ export default function NhapDiem() {
                     : []),
                 ]),
             {
-              title: 'Tổng kết môn',
-              width: 150,
+              title: isFourSkills ? 'Kết quả' : 'Tổng kết môn',
+              width: 155,
               align: 'center',
               render: (_, record) => {
                 const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
                 const app = curSubApprovals[record.studentCode];
                 const { summary, isPass, failedSkills } = evaluateSubjectGrade(curSub, g, app);
 
-                if (!summary) {
-                  if (isFourSkills && failedSkills.length > 0) {
-                    return (
-                      <Tag color="error">
-                        {failedSkills.join(', ')} &lt; 5.0
-                      </Tag>
-                    );
+                if (isFourSkills) {
+                  if (!summary) {
+                    return <Text type="secondary">---</Text>;
                   }
+                  return (
+                    <Space direction="vertical" size={2}>
+                      <Tag
+                        color={isPass ? 'success' : 'error'}
+                        style={{ margin: 0, fontWeight: 700, fontSize: 13, padding: '2px 10px' }}
+                      >
+                        {isPass ? 'ĐẠT' : 'KHÔNG ĐẠT'}
+                      </Tag>
+                      {!isPass && failedSkills.length > 0 && (
+                        <span style={{ fontSize: 11, color: '#ff4d4f' }}>
+                          ({failedSkills.join(', ')})
+                        </span>
+                      )}
+                    </Space>
+                  );
+                }
+
+                if (!summary) {
                   return <Text type="secondary">---</Text>;
                 }
 
@@ -1196,11 +1263,6 @@ export default function NhapDiem() {
                     <Tag color={isPass ? 'success' : 'error'} style={{ margin: 0 }}>
                       {isPass ? 'ĐẠT' : 'CHƯA ĐẠT'}
                     </Tag>
-                    {!isPass && failedSkills.length > 0 && (
-                      <span style={{ fontSize: 11, color: '#ff4d4f' }}>
-                        ({failedSkills.join(', ')} &lt; 5.0)
-                      </span>
-                    )}
                   </Space>
                 );
               },

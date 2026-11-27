@@ -527,7 +527,7 @@ export default function DanhMuc() {
           <Space size={[4, 4]} wrap>
             {r.has_theory && <Tag color="blue">LT</Tag>}
             {r.has_practice && <Tag color="green">TH</Tag>}
-            {is4Skills && <Tag color="purple">4 kỹ năng (Nghe-Nói-Đọc-Viết)</Tag>}
+            {is4Skills && <Tag color="purple">4 kỹ năng (Nghe 20 • Nói 20 • Đọc 40 • Viết 20)</Tag>}
           </Space>
         );
       },
