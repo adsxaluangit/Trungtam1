@@ -203,21 +203,31 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
 
   // ============================================================
   // 2. Fetch danh sách Quyết định mở lớp (cho RECOGNITION dropdown)
+  // Phương án A (giống D:\Github\edumaster): Chỉ hiển thị các QĐ mở lớp
+  // chưa có QĐ công nhận VÀ đã được duyệt thi + nhập điểm
   // ============================================================
   const { data: danhSachQdMoLop } = useQuery({
     queryKey: ['opening-decisions-for-recognition'],
     enabled: !isOpening,
     queryFn: async () => {
-      const [openRes, recRes] = await Promise.all([
+      const [openRes, recRes, apprRes, gradeRes] = await Promise.all([
         api<any>(
           `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=OPENING&populate[school_class]=true&sort=signed_date:desc&pagination[pageSize]=1000&publicationState=preview`,
         ),
         api<any>(
           `/${COLLECTIONS.CLASS_DECISIONS}?filters[type][$eq]=RECOGNITION&populate[related_decision]=true&pagination[pageSize]=1000&publicationState=preview`,
         ),
+        api<any>(
+          `/${COLLECTIONS.EXAM_APPROVALS}?populate[decision]=true&pagination[pageSize]=1000&publicationState=preview`,
+        ),
+        api<any>(
+          `/${COLLECTIONS.EXAM_GRADES}?populate[decision]=true&pagination[pageSize]=1000&publicationState=preview`,
+        ),
       ]);
       const openList = normalizeStrapiList(openRes);
       const recList = normalizeStrapiList(recRes);
+      const apprList = normalizeStrapiList(apprRes);
+      const gradeList = normalizeStrapiList(gradeRes);
 
       const finalizedIds = new Set<string>();
       recList.forEach((r: any) => {
@@ -227,13 +237,81 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
         if (rel?.id) finalizedIds.add(String(rel.id));
       });
 
-      return openList.map((d: any) => ({
-        ...d,
-        _isFinalized:
-          finalizedIds.has(String(d.documentId || '')) ||
-          finalizedIds.has(String(d.strapiId || '')) ||
-          finalizedIds.has(String(d.id || '')),
-      }));
+      const decisionIdsWithApprovals = new Set<string>();
+      apprList.forEach((ea: any) => {
+        const dec = ea.decision?.data || ea.decision;
+        const apprs = ea.approvals;
+        const hasAnyAppr =
+          apprs &&
+          typeof apprs === 'object' &&
+          Object.values(apprs).some((subMap: any) => {
+            if (Array.isArray(subMap)) return subMap.length > 0;
+            if (subMap && typeof subMap === 'object') {
+              return Object.values(subMap).some(
+                (st: any) => st && (st.theoryApproved === true || st.practicePass === true),
+              );
+            }
+            return false;
+          });
+        if (dec && hasAnyAppr) {
+          if (dec.documentId) decisionIdsWithApprovals.add(String(dec.documentId));
+          if (dec.strapiId) decisionIdsWithApprovals.add(String(dec.strapiId));
+          if (dec.id) decisionIdsWithApprovals.add(String(dec.id));
+        }
+      });
+
+      const decisionIdsWithGrades = new Set<string>();
+      gradeList.forEach((eg: any) => {
+        const dec = eg.decision?.data || eg.decision;
+        const grades = eg.grades;
+        const hasAnyGrade =
+          grades &&
+          typeof grades === 'object' &&
+          Object.values(grades).some((subMap: any) => {
+            if (!subMap || typeof subMap !== 'object') return false;
+            return Object.values(subMap).some((g: any) => {
+              if (!g) return false;
+              if (typeof g === 'string' || typeof g === 'number') return String(g).trim() !== '';
+              if (typeof g === 'object') {
+                return (
+                  String(g.theory ?? '').trim() !== '' ||
+                  String(g.practice ?? '').trim() !== '' ||
+                  String(g.listening ?? '').trim() !== '' ||
+                  String(g.speaking ?? '').trim() !== '' ||
+                  String(g.reading ?? '').trim() !== '' ||
+                  String(g.writing ?? '').trim() !== ''
+                );
+              }
+              return false;
+            });
+          });
+        if (dec && hasAnyGrade) {
+          if (dec.documentId) decisionIdsWithGrades.add(String(dec.documentId));
+          if (dec.strapiId) decisionIdsWithGrades.add(String(dec.strapiId));
+          if (dec.id) decisionIdsWithGrades.add(String(dec.id));
+        }
+      });
+
+      return openList.map((d: any) => {
+        const docId = String(d.documentId || '');
+        const strId = String(d.strapiId || '');
+        const rawId = String(d.id || '');
+        const hasAppr =
+          decisionIdsWithApprovals.has(docId) ||
+          decisionIdsWithApprovals.has(strId) ||
+          decisionIdsWithApprovals.has(rawId);
+        const hasGrade =
+          decisionIdsWithGrades.has(docId) ||
+          decisionIdsWithGrades.has(strId) ||
+          decisionIdsWithGrades.has(rawId);
+
+        return {
+          ...d,
+          _isFinalized:
+            finalizedIds.has(docId) || finalizedIds.has(strId) || finalizedIds.has(rawId),
+          _hasApprovalAndGrades: hasAppr && hasGrade,
+        };
+      });
     },
   });
 
@@ -338,6 +416,218 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     );
 
     return mapped;
+  };
+
+  // ============================================================
+  // Lọc học viên đủ điều kiện đưa vào Quyết định Công nhận Tốt nghiệp (RECOGNITION):
+  // Bắt buộc ĐÃ DUYỆT THI (exam_approvals) VÀ ĐÃ CÓ ĐIỂM ĐẠT (exam_grades) ở tất cả các môn của lớp
+  // ============================================================
+  const filterEligibleStudentsForRecognition = async (
+    students: StudentDetail[],
+    openingDecId: string,
+    openingStrapiId?: string | number,
+    classId?: string,
+  ): Promise<StudentDetail[]> => {
+    if (!students.length || !openingDecId) return [];
+
+    // 1. Lấy danh sách môn học của lớp
+    let classObj = danhSachLop?.find(
+      (c: any) =>
+        (classId &&
+          (String(c.documentId || c.id) === String(classId) ||
+            String(c.strapiId) === String(classId))) ||
+        false,
+    );
+    if (!classObj && classId) {
+      try {
+        const clsRes = await api<any>(`/${COLLECTIONS.CLASSES}/${classId}?populate=*`);
+        classObj = clsRes?.data || clsRes;
+      } catch {
+        // ignore
+      }
+    }
+    const requiredSubjects = normalizeStrapiList(
+      classObj?.subjects || { data: classObj?.subjects || [] },
+    );
+
+    // 2. Lấy dữ liệu Duyệt thi (exam_approvals) và Bảng điểm (exam_grades) mới nhất từ server của QĐ Mở lớp
+    let approvalRecord: any = null;
+    let gradeRecord: any = null;
+    try {
+      const [apprRes, gradeRes] = await Promise.all([
+        api<any>(
+          `/${COLLECTIONS.EXAM_APPROVALS}?filters[decision][documentId][$eq]=${encodeURIComponent(openingDecId)}&publicationState=preview`,
+        ),
+        api<any>(
+          `/${COLLECTIONS.EXAM_GRADES}?filters[decision][documentId][$eq]=${encodeURIComponent(openingDecId)}&publicationState=preview`,
+        ),
+      ]);
+      const apprList = normalizeStrapiList(apprRes);
+      const gradeList = normalizeStrapiList(gradeRes);
+      if (apprList.length > 0) approvalRecord = apprList[0];
+      if (gradeList.length > 0) gradeRecord = gradeList[0];
+    } catch {
+      // Fallback sang dữ liệu đã cache
+    }
+
+    if (!approvalRecord && examApprovals?.length) {
+      approvalRecord = examApprovals.find((ea: any) => {
+        const decRel = ea.decision?.data || ea.decision;
+        const docId = String(decRel?.documentId || decRel?.id || '');
+        const strId = String(decRel?.strapiId || decRel?.id || '');
+        return (
+          docId === String(openingDecId) ||
+          strId === String(openingDecId) ||
+          (openingStrapiId && (docId === String(openingStrapiId) || strId === String(openingStrapiId)))
+        );
+      });
+    }
+
+    if (!gradeRecord && examGrades?.length) {
+      gradeRecord = examGrades.find((eg: any) => {
+        const decRel = eg.decision?.data || eg.decision;
+        const docId = String(decRel?.documentId || decRel?.id || '');
+        const strId = String(decRel?.strapiId || decRel?.id || '');
+        return (
+          docId === String(openingDecId) ||
+          strId === String(openingDecId) ||
+          (openingStrapiId && (docId === String(openingStrapiId) || strId === String(openingStrapiId)))
+        );
+      });
+    }
+
+    const subjectApprovals = approvalRecord?.approvals;
+    const subjectGrades = gradeRecord?.grades;
+
+    // Nếu Quyết định mở lớp chưa duyệt thi hoặc chưa nhập điểm -> không có học viên nào đủ điều kiện
+    if (
+      !subjectApprovals ||
+      typeof subjectApprovals !== 'object' ||
+      !subjectGrades ||
+      typeof subjectGrades !== 'object'
+    ) {
+      return [];
+    }
+
+    const fourSkillsCodes = new Set(['HLNV68', 'HLNV79', 'HLNV80', 'HLNV81', 'HLNV82', 'HLNV83']);
+
+    const checkStudentPassSubject = (
+      s: StudentDetail,
+      subj: any,
+      subApprMap: any,
+      subGradeMap: any,
+    ): boolean => {
+      if (!subApprMap || !subGradeMap) return false;
+      const codes = [s.studentCode, s.cardNumber]
+        .map((c) => String(c || '').trim())
+        .filter(Boolean);
+      if (codes.length === 0) return false;
+
+      // 1. Kiểm tra Duyệt điều kiện dự thi
+      let appr: any = null;
+      if (Array.isArray(subApprMap)) {
+        const found = codes.some((c) => subApprMap.includes(c));
+        if (found) appr = { practicePass: true, theoryApproved: true };
+      } else if (typeof subApprMap === 'object') {
+        for (const c of codes) {
+          if (subApprMap[c] !== undefined) {
+            appr = subApprMap[c];
+            break;
+          }
+        }
+      }
+      if (!appr) return false;
+
+      const hasTheory = subj ? subj.has_theory !== false && subj.hasTheory !== false : true;
+      const hasPractice = subj ? subj.has_practice === true || subj.hasPractice === true : false;
+
+      if (hasTheory && appr.theoryApproved !== true) return false;
+      if (hasPractice && appr.practicePass !== true) return false;
+
+      // 2. Kiểm tra Điểm thi đạt
+      let g: any = null;
+      if (typeof subGradeMap === 'object') {
+        for (const c of codes) {
+          if (subGradeMap[c] !== undefined && subGradeMap[c] !== null && subGradeMap[c] !== '') {
+            g = subGradeMap[c];
+            break;
+          }
+        }
+      }
+      if (!g) return false;
+
+      const subCode = String(subj?.code || '').trim().toUpperCase();
+      const isFourSkills =
+        fourSkillsCodes.has(subCode) || String(subj?.notes || '').includes('[4_SKILLS]');
+
+      if (isFourSkills) {
+        if (typeof g === 'object') {
+          const l = parseFloat(g.listening ?? '');
+          const sp = parseFloat(g.speaking ?? '');
+          const r = parseFloat(g.reading ?? '');
+          const w = parseFloat(g.writing ?? '');
+          const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
+          if (hasAny4) {
+            return (
+              !isNaN(l) &&
+              !isNaN(sp) &&
+              !isNaN(r) &&
+              !isNaN(w) &&
+              l >= 10 &&
+              sp >= 10 &&
+              r >= 20 &&
+              w >= 10
+            );
+          }
+          const rawTheory = String(g.theory ?? '').trim();
+          if (rawTheory === 'Đạt') return true;
+          if (rawTheory === 'Không đạt' || rawTheory === 'Chưa đạt') return false;
+          const t = parseFloat(rawTheory);
+          return !isNaN(t) && t >= 5;
+        }
+        const t = parseFloat(String(g));
+        return !isNaN(t) && t >= 5;
+      }
+
+      // Môn học thông thường
+      const t = typeof g === 'object' ? parseFloat(g.theory ?? '') : parseFloat(String(g));
+      const p = typeof g === 'object' ? parseFloat(g.practice ?? '') : NaN;
+
+      if (hasTheory && hasPractice) {
+        if (isNaN(t) || t < 5) return false;
+        if (!isNaN(p)) return p >= 5;
+        return appr.practicePass === true;
+      }
+      if (hasTheory) {
+        return !isNaN(t) && t >= 5;
+      }
+      if (hasPractice) {
+        if (!isNaN(p)) return p >= 5;
+        return appr.practicePass === true;
+      }
+      return !isNaN(t) && t >= 5;
+    };
+
+    return students.filter((s) => {
+      if (requiredSubjects.length > 0) {
+        return requiredSubjects.every((subj: any) => {
+          const k1 = String(subj.strapiId || subj.id);
+          const k2 = String(subj.documentId || subj.id);
+          const subApprMap = subjectApprovals[k1] || subjectApprovals[k2];
+          const subGradeMap = subjectGrades[k1] || subjectGrades[k2];
+          return checkStudentPassSubject(s, subj, subApprMap, subGradeMap);
+        });
+      }
+
+      // Trường hợp lớp chưa gắn danh sách môn cụ thể: kiểm tra trên tất cả các môn đã có trong bảng điểm/duyệt thi
+      const subjectKeys = Array.from(
+        new Set([...Object.keys(subjectApprovals), ...Object.keys(subjectGrades)]),
+      );
+      if (subjectKeys.length === 0) return false;
+      return subjectKeys.every((k) =>
+        checkStudentPassSubject(s, null, subjectApprovals[k], subjectGrades[k]),
+      );
+    });
   };
 
   // ============================================================
@@ -580,6 +870,11 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setLopDuocChon(null);
     setRelatedOpeningId('');
     setDupCourseWarning(null);
+    if (!isOpening) {
+      qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
+      qc.invalidateQueries({ queryKey: ['exam-grades-for-decisions'] });
+      qc.invalidateQueries({ queryKey: ['exam-approvals-for-decisions'] });
+    }
     form.setFieldsValue({
       signed_date: dayjs(),
       signer_name: 'HIỆU TRƯỞNG',
@@ -599,6 +894,12 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setRelatedOpeningId('');
     setDupCourseWarning(null);
     form.resetFields();
+
+    if (!isOpening) {
+      qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
+      qc.invalidateQueries({ queryKey: ['exam-grades-for-decisions'] });
+      qc.invalidateQueries({ queryKey: ['exam-approvals-for-decisions'] });
+    }
 
     const cls = item.school_class;
     const classId = cls?.documentId || cls?.id;
@@ -626,7 +927,17 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     try {
       const docId = item.documentId || item.id;
       const students = await loadDecisionStudents(docId);
-      setTempStudents(students);
+      if (!isOpening && relId) {
+        const eligible = await filterEligibleStudentsForRecognition(
+          students,
+          String(relId),
+          relDecObj?.strapiId || relDecObj?.id,
+          classId,
+        );
+        setTempStudents(eligible);
+      } else {
+        setTempStudents(students);
+      }
     } catch {
       setTempStudents(item.students || []);
     }
@@ -674,6 +985,18 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       return;
     }
 
+    const relDecObj = item?.related_decision?.data || item?.related_decision || editingItem?.related_decision?.data || editingItem?.related_decision;
+    const relId =
+      relDecObj?.documentId ||
+      relDecObj?.id ||
+      form.getFieldValue('relatedOpeningId') ||
+      relatedOpeningId;
+
+    if (!isOpening && !relId) {
+      message.warning('Vui lòng chọn QĐ Mở lớp liên kết (đã duyệt thi và nhập điểm) trước khi thêm học viên!');
+      return;
+    }
+
     setPickerLoading(true);
     setPickerSearch('');
     setPickerSelected(new Set());
@@ -696,37 +1019,31 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           const matchApproved = s.is_approved === true || String(s.is_approved).toLowerCase() === 'true';
           return matchClass && matchApproved;
         });
-      } else {
-        // Đối với Quyết định công nhận: ưu tiên lấy học viên từ Quyết định mở lớp liên kết hoặc đúng lớp đó
-        const relId =
-          item?.related_decision?.documentId ||
-          item?.related_decision?.id ||
-          form.getFieldValue('relatedOpeningId') ||
-          relatedOpeningId;
-        if (relId) {
-          const openStudents = await loadDecisionStudents(String(relId));
-          students = openStudents.map((sv) => ({
-            id: sv.id,
-            documentId: sv.id,
-            strapiId: sv.strapiId,
-            full_name: sv.fullName,
-            gender: sv.gender,
-            dob: sv.dob,
-            id_number: sv.cardNumber,
-            student_code: sv.studentCode,
-            pob: sv.hometown,
-            address: sv.address,
-            phone: sv.phone,
-            notes: sv.notes,
-            photo: sv.photo,
-            school_class: { name: activeClassName },
-          }));
-        } else if (activeClassId) {
-          const res = await api<any>(
-            `/${COLLECTIONS.STUDENTS}?filters[school_class][documentId][$eq]=${activeClassId}&filters[is_approved][$eq]=true&populate[school_class]=true&pagination[pageSize]=500&publicationState=preview`,
-          );
-          students = normalizeStrapiList(res);
-        }
+      } else if (relId) {
+        // Đối với Quyết định công nhận: chỉ lấy học viên từ QĐ mở lớp liên kết ĐÃ DUYỆT THI và ĐẠT ĐIỂM tất cả các môn
+        const openStudents = await loadDecisionStudents(String(relId));
+        const eligibleStudents = await filterEligibleStudentsForRecognition(
+          openStudents,
+          String(relId),
+          relDecObj?.strapiId || relDecObj?.id,
+          activeClassId,
+        );
+        students = eligibleStudents.map((sv) => ({
+          id: sv.id,
+          documentId: sv.id,
+          strapiId: sv.strapiId,
+          full_name: sv.fullName,
+          gender: sv.gender,
+          dob: sv.dob,
+          id_number: sv.cardNumber,
+          student_code: sv.studentCode,
+          pob: sv.hometown,
+          address: sv.address,
+          phone: sv.phone,
+          notes: sv.notes,
+          photo: sv.photo,
+          school_class: { name: activeClassName },
+        }));
       }
 
       // Filter out already in tempStudents
@@ -3587,9 +3904,13 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
             </Col>
             {!isOpening && (
               <Col xs={24} md={12}>
-                <Form.Item name="relatedOpeningId" label="QĐ Mở lớp liên kết">
+                <Form.Item
+                  name="relatedOpeningId"
+                  label="QĐ Mở lớp liên kết"
+                  rules={[{ required: !editingItem, message: 'Vui lòng chọn QĐ mở lớp liên kết' }]}
+                >
                   <Select
-                    placeholder="Chọn QĐ mở lớp (chưa có QĐ công nhận)..."
+                    placeholder="Chọn QĐ mở lớp (đã duyệt thi & nhập điểm)..."
                     showSearch
                     optionFilterProp="label"
                     popupMatchSelectWidth={false}
@@ -3597,32 +3918,52 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                     disabled={isLockedViewMode}
                     onChange={async (v) => {
                       setRelatedOpeningId(v || '');
-                      if (v) {
-                        const relDec = danhSachQdMoLop?.find(
-                          (d: any) => String(d.documentId || d.id) === String(v),
+                      if (!v) {
+                        setTempStudents([]);
+                        return;
+                      }
+                      const relDec = danhSachQdMoLop?.find(
+                        (d: any) => String(d.documentId || d.id) === String(v),
+                      );
+                      const clsId =
+                        relDec?.school_class?.documentId ||
+                        relDec?.school_class?.id ||
+                        form.getFieldValue('classId');
+                      if (relDec) {
+                        if (clsId) {
+                          setLopDuocChon(clsId);
+                          form.setFieldValue('classId', clsId);
+                        }
+                        if (relDec.training_course) {
+                          form.setFieldValue('training_course', relDec.training_course);
+                        }
+                      }
+                      try {
+                        const students = await loadDecisionStudents(String(v));
+                        const eligibleStudents = await filterEligibleStudentsForRecognition(
+                          students,
+                          String(v),
+                          relDec?.strapiId || relDec?.id,
+                          clsId,
                         );
-                        if (relDec) {
-                          const clsId = relDec.school_class?.documentId || relDec.school_class?.id;
-                          if (clsId) {
-                            setLopDuocChon(clsId);
-                            form.setFieldValue('classId', clsId);
-                          }
-                          if (relDec.training_course) {
-                            form.setFieldValue('training_course', relDec.training_course);
-                          }
+                        setTempStudents(eligibleStudents);
+                        if (eligibleStudents.length === 0) {
+                          message.warning(
+                            'Quyết định mở lớp này chưa có học viên nào hoàn thành duyệt thi và đạt điểm tất cả các môn!',
+                          );
+                        } else if (eligibleStudents.length < students.length) {
+                          message.info(
+                            `Đã nạp ${eligibleStudents.length}/${students.length} học viên đủ điều kiện tốt nghiệp (Đã loại ${students.length - eligibleStudents.length} học viên chưa duyệt thi hoặc chưa đạt điểm).`,
+                          );
                         }
-                        try {
-                          const students = await loadDecisionStudents(String(v));
-                          setTempStudents(students);
-                        } catch {
-                          // ignore
-                        }
+                      } catch {
+                        setTempStudents([]);
                       }
                     }}
                     options={(danhSachQdMoLop || [])
                       .filter(
                         (d: any) =>
-                          !d._isFinalized ||
+                          (!d._isFinalized && d._hasApprovalAndGrades) ||
                           (editingItem &&
                             (String(d.documentId || d.id) === String(relatedOpeningId) ||
                               String(d.strapiId) === String(relatedOpeningId))),
