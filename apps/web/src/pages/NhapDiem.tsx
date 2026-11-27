@@ -383,10 +383,9 @@ export default function NhapDiem() {
     const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
     const subKey = String(curSub?.strapiId || selectedSubjectId);
     const curSubGrades = inputGrades[subKey] || {};
+    const prev = curSubGrades[studentCode] || { theory: '', practice: '' };
     const studentGrade: GradeData = {
-      theory: '',
-      practice: '',
-      ...(curSubGrades[studentCode] || {}),
+      ...prev,
       [type]: value,
     };
 
