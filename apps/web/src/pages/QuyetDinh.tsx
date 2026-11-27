@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -26,6 +27,7 @@ import {
 import type { TableProps } from 'antd';
 import {
   CameraOutlined,
+  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   FileExcelOutlined,
@@ -45,6 +47,7 @@ import {
   UploadOutlined,
   CalendarOutlined,
   TrophyOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, COLLECTIONS, normalizeStrapiList, uploadFile } from '../api';
@@ -70,6 +73,18 @@ interface StudentDetail {
   notes: string;
   photo?: string | null;
   documents?: any[];
+}
+
+interface IneligibleStudentWarning {
+  id: string;
+  fullName: string;
+  cardNumber: string;
+  dob: string;
+  missingSubjects: {
+    subjectName: string;
+    subjectCode: string;
+    reasons: string[];
+  }[];
 }
 
 export default function QuyetDinh({ mode }: QuyetDinhProps) {
@@ -101,6 +116,9 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   const [lopDuocChon, setLopDuocChon] = useState<string | null>(null);
   const [relatedOpeningId, setRelatedOpeningId] = useState<string>('');
   const [dupCourseWarning, setDupCourseWarning] = useState<string | null>(null);
+  const [ineligibleStudents, setIneligibleStudents] = useState<IneligibleStudentWarning[]>([]);
+  const [totalOpeningStudentsCount, setTotalOpeningStudentsCount] = useState<number>(0);
+  const [showIneligibleDetail, setShowIneligibleDetail] = useState<boolean>(true);
 
   // Student picker modal
   const [moPickerModal, setMoPickerModal] = useState(false);
@@ -419,16 +437,22 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
   };
 
   // ============================================================
-  // Lọc học viên đủ điều kiện đưa vào Quyết định Công nhận Tốt nghiệp (RECOGNITION):
-  // Bắt buộc ĐÃ DUYỆT THI (exam_approvals) VÀ ĐÃ CÓ ĐIỂM ĐẠT (exam_grades) ở tất cả các môn của lớp
+  // Phân tích chi tiết từng học viên trên từng môn học của lớp khi lập Quyết định Công nhận Tốt nghiệp:
+  // - eligible: Danh sách học viên ĐÃ DUYỆT THI và ĐẠT ĐIỂM tất cả các môn
+  // - ineligible: Danh sách học viên còn thiếu duyệt thi / thiếu điểm / điểm không đạt kèm chi tiết từng môn
   // ============================================================
-  const filterEligibleStudentsForRecognition = async (
+  const analyzeStudentsForRecognition = async (
     students: StudentDetail[],
     openingDecId: string,
     openingStrapiId?: string | number,
     classId?: string,
-  ): Promise<StudentDetail[]> => {
-    if (!students.length || !openingDecId) return [];
+  ): Promise<{
+    eligible: StudentDetail[];
+    ineligible: IneligibleStudentWarning[];
+  }> => {
+    if (!students.length || !openingDecId) {
+      return { eligible: [], ineligible: [] };
+    }
 
     // 1. Lấy danh sách môn học của lớp
     let classObj = danhSachLop?.find(
@@ -496,39 +520,38 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       });
     }
 
-    const subjectApprovals = approvalRecord?.approvals;
-    const subjectGrades = gradeRecord?.grades;
-
-    // Nếu Quyết định mở lớp chưa duyệt thi hoặc chưa nhập điểm -> không có học viên nào đủ điều kiện
-    if (
-      !subjectApprovals ||
-      typeof subjectApprovals !== 'object' ||
-      !subjectGrades ||
-      typeof subjectGrades !== 'object'
-    ) {
-      return [];
-    }
+    const subjectApprovals =
+      approvalRecord?.approvals && typeof approvalRecord.approvals === 'object'
+        ? approvalRecord.approvals
+        : {};
+    const subjectGrades =
+      gradeRecord?.grades && typeof gradeRecord.grades === 'object' ? gradeRecord.grades : {};
 
     const fourSkillsCodes = new Set(['HLNV68', 'HLNV79', 'HLNV80', 'HLNV81', 'HLNV82', 'HLNV83']);
 
-    const checkStudentPassSubject = (
+    const inspectStudentSubject = (
       s: StudentDetail,
       subj: any,
       subApprMap: any,
       subGradeMap: any,
-    ): boolean => {
-      if (!subApprMap || !subGradeMap) return false;
+    ): string[] => {
+      const reasons: string[] = [];
       const codes = [s.studentCode, s.cardNumber]
         .map((c) => String(c || '').trim())
         .filter(Boolean);
-      if (codes.length === 0) return false;
+      if (codes.length === 0) {
+        return ['Thiếu mã học viên / CCCD'];
+      }
+
+      const hasTheory = subj ? subj.has_theory !== false && subj.hasTheory !== false : true;
+      const hasPractice = subj ? subj.has_practice === true || subj.hasPractice === true : false;
 
       // 1. Kiểm tra Duyệt điều kiện dự thi
       let appr: any = null;
       if (Array.isArray(subApprMap)) {
         const found = codes.some((c) => subApprMap.includes(c));
         if (found) appr = { practicePass: true, theoryApproved: true };
-      } else if (typeof subApprMap === 'object') {
+      } else if (subApprMap && typeof subApprMap === 'object') {
         for (const c of codes) {
           if (subApprMap[c] !== undefined) {
             appr = subApprMap[c];
@@ -536,17 +559,19 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           }
         }
       }
-      if (!appr) return false;
 
-      const hasTheory = subj ? subj.has_theory !== false && subj.hasTheory !== false : true;
-      const hasPractice = subj ? subj.has_practice === true || subj.hasPractice === true : false;
+      if (!appr) {
+        if (hasTheory && hasPractice) reasons.push('Chưa duyệt thi LT & TH');
+        else if (hasTheory) reasons.push('Chưa duyệt thi LT');
+        else if (hasPractice) reasons.push('Chưa duyệt Đạt TH');
+      } else {
+        if (hasTheory && appr.theoryApproved !== true) reasons.push('Chưa duyệt thi LT');
+        if (hasPractice && appr.practicePass !== true) reasons.push('Chưa duyệt Đạt TH');
+      }
 
-      if (hasTheory && appr.theoryApproved !== true) return false;
-      if (hasPractice && appr.practicePass !== true) return false;
-
-      // 2. Kiểm tra Điểm thi đạt
+      // 2. Kiểm tra Điểm thi
       let g: any = null;
-      if (typeof subGradeMap === 'object') {
+      if (subGradeMap && typeof subGradeMap === 'object') {
         for (const c of codes) {
           if (subGradeMap[c] !== undefined && subGradeMap[c] !== null && subGradeMap[c] !== '') {
             g = subGradeMap[c];
@@ -554,11 +579,15 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           }
         }
       }
-      if (!g) return false;
 
       const subCode = String(subj?.code || '').trim().toUpperCase();
       const isFourSkills =
         fourSkillsCodes.has(subCode) || String(subj?.notes || '').includes('[4_SKILLS]');
+
+      if (!g) {
+        reasons.push(isFourSkills ? 'Chưa vào điểm (Nghe, Nói, Đọc, Viết)' : 'Chưa vào điểm');
+        return reasons;
+      }
 
       if (isFourSkills) {
         if (typeof g === 'object') {
@@ -568,66 +597,142 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           const w = parseFloat(g.writing ?? '');
           const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
           if (hasAny4) {
-            return (
-              !isNaN(l) &&
-              !isNaN(sp) &&
-              !isNaN(r) &&
-              !isNaN(w) &&
-              l >= 10 &&
-              sp >= 10 &&
-              r >= 20 &&
-              w >= 10
-            );
+            const missingSkills: string[] = [];
+            if (isNaN(l)) missingSkills.push('Nghe');
+            if (isNaN(sp)) missingSkills.push('Nói');
+            if (isNaN(r)) missingSkills.push('Đọc');
+            if (isNaN(w)) missingSkills.push('Viết');
+            if (missingSkills.length > 0) {
+              reasons.push(`Chưa vào điểm: ${missingSkills.join(', ')}`);
+            }
+
+            const failedSkills: string[] = [];
+            if (!isNaN(l) && l < 10) failedSkills.push(`Nghe ${l}/20`);
+            if (!isNaN(sp) && sp < 10) failedSkills.push(`Nói ${sp}/20`);
+            if (!isNaN(r) && r < 20) failedSkills.push(`Đọc ${r}/40`);
+            if (!isNaN(w) && w < 10) failedSkills.push(`Viết ${w}/20`);
+            if (failedSkills.length > 0) {
+              reasons.push(`Điểm < 50% (${failedSkills.join(', ')})`);
+            }
+          } else {
+            const rawTheory = String(g.theory ?? '').trim();
+            if (!rawTheory) {
+              reasons.push('Chưa vào điểm (Nghe, Nói, Đọc, Viết)');
+            } else if (rawTheory === 'Không đạt' || rawTheory === 'Chưa đạt') {
+              reasons.push('Kết quả: Không đạt');
+            } else if (rawTheory !== 'Đạt') {
+              const t = parseFloat(rawTheory);
+              if (isNaN(t)) reasons.push('Chưa vào điểm');
+              else if (t < 5) reasons.push(`Điểm không đạt (${t} < 5.0)`);
+            }
           }
-          const rawTheory = String(g.theory ?? '').trim();
-          if (rawTheory === 'Đạt') return true;
-          if (rawTheory === 'Không đạt' || rawTheory === 'Chưa đạt') return false;
-          const t = parseFloat(rawTheory);
-          return !isNaN(t) && t >= 5;
+        } else {
+          const t = parseFloat(String(g));
+          if (isNaN(t)) reasons.push('Chưa vào điểm');
+          else if (t < 5) reasons.push(`Điểm không đạt (${t} < 5.0)`);
         }
-        const t = parseFloat(String(g));
-        return !isNaN(t) && t >= 5;
+        return reasons;
       }
 
       // Môn học thông thường
       const t = typeof g === 'object' ? parseFloat(g.theory ?? '') : parseFloat(String(g));
       const p = typeof g === 'object' ? parseFloat(g.practice ?? '') : NaN;
 
-      if (hasTheory && hasPractice) {
-        if (isNaN(t) || t < 5) return false;
-        if (!isNaN(p)) return p >= 5;
-        return appr.practicePass === true;
-      }
       if (hasTheory) {
-        return !isNaN(t) && t >= 5;
+        if (isNaN(t)) reasons.push('Chưa vào điểm LT');
+        else if (t < 5) reasons.push(`Điểm LT không đạt (${t} < 5.0)`);
       }
       if (hasPractice) {
-        if (!isNaN(p)) return p >= 5;
-        return appr.practicePass === true;
+        if (!isNaN(p) && p < 5) {
+          reasons.push(`Điểm TH không đạt (${p} < 5.0)`);
+        } else if (isNaN(p) && (!appr || appr.practicePass !== true)) {
+          if (!reasons.includes('Chưa duyệt Đạt TH') && !reasons.includes('Chưa duyệt thi LT & TH')) {
+            reasons.push('Chưa vào điểm / duyệt TH');
+          }
+        }
       }
-      return !isNaN(t) && t >= 5;
+
+      return reasons;
     };
 
-    return students.filter((s) => {
+    const eligible: StudentDetail[] = [];
+    const ineligible: IneligibleStudentWarning[] = [];
+
+    for (const s of students) {
+      const missingSubjects: {
+        subjectName: string;
+        subjectCode: string;
+        reasons: string[];
+      }[] = [];
+
       if (requiredSubjects.length > 0) {
-        return requiredSubjects.every((subj: any) => {
+        for (const subj of requiredSubjects) {
           const k1 = String(subj.strapiId || subj.id);
           const k2 = String(subj.documentId || subj.id);
           const subApprMap = subjectApprovals[k1] || subjectApprovals[k2];
           const subGradeMap = subjectGrades[k1] || subjectGrades[k2];
-          return checkStudentPassSubject(s, subj, subApprMap, subGradeMap);
-        });
+          const reasons = inspectStudentSubject(s, subj, subApprMap, subGradeMap);
+          if (reasons.length > 0) {
+            missingSubjects.push({
+              subjectName: subj.name || 'Môn học',
+              subjectCode: subj.code || '',
+              reasons,
+            });
+          }
+        }
+      } else {
+        const subjectKeys = Array.from(
+          new Set([...Object.keys(subjectApprovals), ...Object.keys(subjectGrades)]),
+        );
+        if (subjectKeys.length === 0) {
+          missingSubjects.push({
+            subjectName: 'Tất cả các môn của lớp',
+            subjectCode: '',
+            reasons: ['Chưa duyệt thi', 'Chưa vào điểm'],
+          });
+        } else {
+          for (const k of subjectKeys) {
+            const reasons = inspectStudentSubject(s, null, subjectApprovals[k], subjectGrades[k]);
+            if (reasons.length > 0) {
+              missingSubjects.push({
+                subjectName: `Môn #${k}`,
+                subjectCode: k,
+                reasons,
+              });
+            }
+          }
+        }
       }
 
-      // Trường hợp lớp chưa gắn danh sách môn cụ thể: kiểm tra trên tất cả các môn đã có trong bảng điểm/duyệt thi
-      const subjectKeys = Array.from(
-        new Set([...Object.keys(subjectApprovals), ...Object.keys(subjectGrades)]),
-      );
-      if (subjectKeys.length === 0) return false;
-      return subjectKeys.every((k) =>
-        checkStudentPassSubject(s, null, subjectApprovals[k], subjectGrades[k]),
-      );
-    });
+      if (missingSubjects.length === 0) {
+        eligible.push(s);
+      } else {
+        ineligible.push({
+          id: s.id,
+          fullName: s.fullName,
+          cardNumber: s.cardNumber || s.studentCode || '---',
+          dob: s.dob,
+          missingSubjects,
+        });
+      }
+    }
+
+    return { eligible, ineligible };
+  };
+
+  const filterEligibleStudentsForRecognition = async (
+    students: StudentDetail[],
+    openingDecId: string,
+    openingStrapiId?: string | number,
+    classId?: string,
+  ): Promise<StudentDetail[]> => {
+    const res = await analyzeStudentsForRecognition(
+      students,
+      openingDecId,
+      openingStrapiId,
+      classId,
+    );
+    return res.eligible;
   };
 
   // ============================================================
@@ -870,6 +975,9 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setLopDuocChon(null);
     setRelatedOpeningId('');
     setDupCourseWarning(null);
+    setIneligibleStudents([]);
+    setTotalOpeningStudentsCount(0);
+    setShowIneligibleDetail(true);
     if (!isOpening) {
       qc.invalidateQueries({ queryKey: ['opening-decisions-for-recognition'] });
       qc.invalidateQueries({ queryKey: ['exam-grades-for-decisions'] });
@@ -893,6 +1001,9 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     setLopDuocChon(null);
     setRelatedOpeningId('');
     setDupCourseWarning(null);
+    setIneligibleStudents([]);
+    setTotalOpeningStudentsCount(0);
+    setShowIneligibleDetail(true);
     form.resetFields();
 
     if (!isOpening) {
@@ -928,13 +1039,30 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
       const docId = item.documentId || item.id;
       const students = await loadDecisionStudents(docId);
       if (!isOpening && relId) {
-        const eligible = await filterEligibleStudentsForRecognition(
-          students,
+        const openStudents = await loadDecisionStudents(String(relId));
+        const baseList = openStudents.length > 0 ? openStudents : students;
+        setTotalOpeningStudentsCount(baseList.length);
+        const { eligible, ineligible } = await analyzeStudentsForRecognition(
+          baseList,
           String(relId),
           relDecObj?.strapiId || relDecObj?.id,
           classId,
         );
-        setTempStudents(eligible);
+        setIneligibleStudents(ineligible);
+        // Nếu QĐ công nhận đã lưu danh sách học viên hợp lệ thì giữ các học viên đã đạt
+        if (students.length > 0) {
+          const eligibleIdSet = new Set(
+            eligible.flatMap((s) => [String(s.id), s.strapiId ? String(s.strapiId) : '']).filter(Boolean),
+          );
+          const filteredSaved = students.filter(
+            (s) =>
+              eligibleIdSet.has(String(s.id)) ||
+              (s.strapiId && eligibleIdSet.has(String(s.strapiId))),
+          );
+          setTempStudents(filteredSaved.length > 0 ? filteredSaved : eligible);
+        } else {
+          setTempStudents(eligible);
+        }
       } else {
         setTempStudents(students);
       }
@@ -3910,7 +4038,7 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                   rules={[{ required: !editingItem, message: 'Vui lòng chọn QĐ mở lớp liên kết' }]}
                 >
                   <Select
-                    placeholder="Chọn QĐ mở lớp (đã duyệt thi & nhập điểm)..."
+                    placeholder="Chọn QĐ mở lớp (chưa có QĐ công nhận)..."
                     showSearch
                     optionFilterProp="label"
                     popupMatchSelectWidth={false}
@@ -3920,6 +4048,8 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                       setRelatedOpeningId(v || '');
                       if (!v) {
                         setTempStudents([]);
+                        setIneligibleStudents([]);
+                        setTotalOpeningStudentsCount(0);
                         return;
                       }
                       const relDec = danhSachQdMoLop?.find(
@@ -3940,37 +4070,50 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                       }
                       try {
                         const students = await loadDecisionStudents(String(v));
-                        const eligibleStudents = await filterEligibleStudentsForRecognition(
+                        setTotalOpeningStudentsCount(students.length);
+                        const { eligible, ineligible } = await analyzeStudentsForRecognition(
                           students,
                           String(v),
                           relDec?.strapiId || relDec?.id,
                           clsId,
                         );
-                        setTempStudents(eligibleStudents);
-                        if (eligibleStudents.length === 0) {
+                        setTempStudents(eligible);
+                        setIneligibleStudents(ineligible);
+                        setShowIneligibleDetail(true);
+
+                        if (eligible.length === 0) {
                           message.warning(
-                            'Quyết định mở lớp này chưa có học viên nào hoàn thành duyệt thi và đạt điểm tất cả các môn!',
+                            `Cảnh báo: Chưa có học viên nào (0/${students.length}) hoàn thành duyệt thi và đạt điểm tất cả các môn! Xem chi tiết các môn thiếu bên dưới.`,
+                            6,
                           );
-                        } else if (eligibleStudents.length < students.length) {
-                          message.info(
-                            `Đã nạp ${eligibleStudents.length}/${students.length} học viên đủ điều kiện tốt nghiệp (Đã loại ${students.length - eligibleStudents.length} học viên chưa duyệt thi hoặc chưa đạt điểm).`,
+                        } else if (ineligible.length > 0) {
+                          message.warning(
+                            `Đã nạp ${eligible.length}/${students.length} học viên đủ điều kiện. Cảnh báo: Có ${ineligible.length} học viên chưa duyệt thi hoặc chưa đủ điểm đạt!`,
+                            6,
+                          );
+                        } else {
+                          message.success(
+                            `Đủ 100% quân số: Tất cả ${eligible.length}/${students.length} học viên đều đã duyệt thi và đạt điểm tất cả các môn!`,
+                            4,
                           );
                         }
                       } catch {
                         setTempStudents([]);
+                        setIneligibleStudents([]);
+                        setTotalOpeningStudentsCount(0);
                       }
                     }}
                     options={(danhSachQdMoLop || [])
                       .filter(
                         (d: any) =>
-                          (!d._isFinalized && d._hasApprovalAndGrades) ||
+                          !d._isFinalized ||
                           (editingItem &&
                             (String(d.documentId || d.id) === String(relatedOpeningId) ||
                               String(d.strapiId) === String(relatedOpeningId))),
                       )
                       .map((d: any) => ({
                         value: d.documentId || d.id,
-                        label: `${d.decision_number} – ${d.school_class?.name || ''}${d.training_course ? ` (${d.training_course})` : ''}`,
+                        label: `${d.decision_number} – ${d.school_class?.name || ''}${d.training_course ? ` (${d.training_course})` : ''} ${d._hasApprovalAndGrades ? '[✅ Đã có điểm]' : '[⚠️ Chưa duyệt / Chưa vào điểm]'}`,
                       }))}
                   />
                 </Form.Item>
@@ -4008,6 +4151,131 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
           <Form.Item name="notes" label="Ghi chú thêm">
             <Input.TextArea rows={2} placeholder="Nội dung ghi chú..." disabled={isLockedViewMode} />
           </Form.Item>
+
+          {!isOpening && relatedOpeningId && totalOpeningStudentsCount > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              {ineligibleStudents.length === 0 ? (
+                <Alert
+                  type="success"
+                  showIcon
+                  icon={<CheckCircleOutlined />}
+                  message={
+                    <span>
+                      <b>Đủ 100% quân số ({tempStudents.length}/{totalOpeningStudentsCount} học viên):</b> Tất cả học viên của Quyết định mở lớp đều đã được duyệt thi và vào điểm Đạt ở tất cả các môn học.
+                    </span>
+                  }
+                />
+              ) : (
+                <Alert
+                  type="warning"
+                  showIcon
+                  icon={<WarningOutlined />}
+                  message={
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ color: '#b45309', fontWeight: 700, fontSize: 13.5 }}>
+                        CẢNH BÁO CHỐNG SÓT HỌC VIÊN: Có {ineligibleStudents.length}/{totalOpeningStudentsCount} học viên chưa được đưa vào danh sách công nhận do chưa duyệt thi, chưa vào điểm hoặc điểm không đạt!
+                      </span>
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        onClick={() => setShowIneligibleDetail((prev) => !prev)}
+                      >
+                        {showIneligibleDetail
+                          ? 'Thu gọn danh sách thiếu'
+                          : `Xem ${ineligibleStudents.length} học viên bị thiếu`}
+                      </Button>
+                    </div>
+                  }
+                  description={
+                    showIneligibleDetail ? (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          maxHeight: 240,
+                          overflowY: 'auto',
+                          background: '#fff',
+                          border: '1px solid #fde68a',
+                          borderRadius: 6,
+                        }}
+                      >
+                        <table
+                          style={{
+                            width: '100%',
+                            borderCollapse: 'collapse',
+                            fontSize: 12.5,
+                          }}
+                        >
+                          <thead>
+                            <tr style={{ background: '#fef3c7', borderBottom: '1px solid #fcd34d' }}>
+                              <th style={{ padding: '6px 8px', width: 45, textAlign: 'center' }}>STT</th>
+                              <th style={{ padding: '6px 8px', width: 190, textAlign: 'left' }}>Họ và tên</th>
+                              <th style={{ padding: '6px 8px', width: 125, textAlign: 'center' }}>Số CCCD</th>
+                              <th style={{ padding: '6px 8px', textAlign: 'left' }}>
+                                Chi tiết môn học chưa duyệt thi / chưa vào điểm / không đạt
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ineligibleStudents.map((st, idx) => (
+                              <tr
+                                key={st.id || idx}
+                                style={{
+                                  borderBottom: '1px solid #fef3c7',
+                                  background: idx % 2 === 1 ? '#fffbeb' : '#fff',
+                                }}
+                              >
+                                <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>
+                                  {idx + 1}
+                                </td>
+                                <td style={{ padding: '6px 8px', fontWeight: 700, color: '#92400e' }}>
+                                  {st.fullName}
+                                </td>
+                                <td style={{ padding: '6px 8px', textAlign: 'center', fontFamily: 'monospace' }}>
+                                  {st.cardNumber}
+                                </td>
+                                <td style={{ padding: '6px 8px' }}>
+                                  {st.missingSubjects.map((ms, mIdx) => (
+                                    <div key={mIdx} style={{ marginBottom: 3, lineHeight: 1.45 }}>
+                                      • <b>{ms.subjectName}</b>
+                                      {ms.subjectCode ? ` (${ms.subjectCode})` : ''}:{' '}
+                                      {ms.reasons.map((r, rIdx) => (
+                                        <Tag
+                                          key={rIdx}
+                                          color={
+                                            r.includes('Chưa duyệt')
+                                              ? 'orange'
+                                              : r.includes('Chưa vào điểm')
+                                                ? 'volcano'
+                                                : 'error'
+                                          }
+                                          style={{ margin: '1px 4px 1px 0', fontSize: 11.5 }}
+                                        >
+                                          {r}
+                                        </Tag>
+                                      ))}
+                                    </div>
+                                  ))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null
+                  }
+                />
+              )}
+            </div>
+          )}
 
           <Divider orientation="left">
             <span style={{ fontSize: 13, color: '#1677ff' }}>
