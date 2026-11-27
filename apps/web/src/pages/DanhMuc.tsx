@@ -518,13 +518,19 @@ export default function DanhMuc() {
     {
       title: 'Thi TH/LT',
       key: 'has',
-      width: 130,
-      render: (_, r) => (
-        <Space size={4}>
-          {r.has_theory && <Tag color="blue">LT</Tag>}
-          {r.has_practice && <Tag color="green">TH</Tag>}
-        </Space>
-      ),
+      width: 210,
+      render: (_, r) => {
+        const is4Skills = ['HLNV68', 'HLNV79', 'HLNV80', 'HLNV81', 'HLNV82', 'HLNV83'].includes(
+          String(r.code || '').trim().toUpperCase(),
+        );
+        return (
+          <Space size={[4, 4]} wrap>
+            {r.has_theory && <Tag color="blue">LT</Tag>}
+            {r.has_practice && <Tag color="green">TH</Tag>}
+            {is4Skills && <Tag color="purple">4 kỹ năng (Nghe-Nói-Đọc-Viết)</Tag>}
+          </Space>
+        );
+      },
     },
     {
       title: 'Thao tác',

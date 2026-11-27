@@ -31,6 +31,22 @@ import { fmtNgay } from '../constants';
 
 const { Title, Text } = Typography;
 
+export const FOUR_SKILLS_SUBJECT_CODES = new Set([
+  'HLNV68',
+  'HLNV79',
+  'HLNV80',
+  'HLNV81',
+  'HLNV82',
+  'HLNV83',
+]);
+
+export function isFourSkillsSubject(s?: { code?: string; name?: string; notes?: string } | null): boolean {
+  if (!s) return false;
+  const code = String(s.code || '').trim().toUpperCase();
+  if (FOUR_SKILLS_SUBJECT_CODES.has(code)) return true;
+  return String(s.notes || '').includes('[4_SKILLS]');
+}
+
 interface StudentItem {
   id: string;
   studentCode: string;
@@ -44,13 +60,104 @@ interface SubjectItem {
   strapiId?: number;
   code: string;
   name: string;
+  notes?: string;
   hasTheory?: boolean;
   hasPractice?: boolean;
 }
 
-interface GradeData {
+export interface GradeData {
   theory: string;
   practice: string;
+  listening?: string;
+  speaking?: string;
+  reading?: string;
+  writing?: string;
+}
+
+type GradeField = 'theory' | 'practice' | 'listening' | 'speaking' | 'reading' | 'writing';
+
+export function evaluateSubjectGrade(
+  sub: SubjectItem | undefined,
+  g: GradeData | undefined,
+  app?: { practicePass?: boolean; theoryApproved?: boolean },
+): {
+  summary: string;
+  isPass: boolean;
+  failedSkills: string[];
+} {
+  const grade = g || { theory: '', practice: '' };
+  if (!sub) return { summary: '', isPass: false, failedSkills: [] };
+
+  if (isFourSkillsSubject(sub)) {
+    const l = parseFloat(grade.listening ?? '');
+    const sp = parseFloat(grade.speaking ?? '');
+    const r = parseFloat(grade.reading ?? '');
+    const w = parseFloat(grade.writing ?? '');
+    const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
+    const hasAll4 = !isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w);
+
+    const failedSkills: string[] = [];
+    if (!isNaN(l) && l < 5) failedSkills.push('Nghe');
+    if (!isNaN(sp) && sp < 5) failedSkills.push('Nói');
+    if (!isNaN(r) && r < 5) failedSkills.push('Đọc');
+    if (!isNaN(w) && w < 5) failedSkills.push('Viết');
+
+    if (hasAll4) {
+      const avg = (l + sp + r + w) / 4;
+      // Cả 4 điểm Nghe, Nói, Đọc, Viết đều phải >= 5.0 mới Đạt
+      const isPass = l >= 5 && sp >= 5 && r >= 5 && w >= 5;
+      return {
+        summary: avg.toFixed(1),
+        isPass,
+        failedSkills,
+      };
+    }
+
+    // Tương thích ngược với các lớp cũ nếu trước đây mới chỉ nhập 1 cột điểm theory
+    if (!hasAny4) {
+      const t = parseFloat(grade.theory);
+      if (!isNaN(t)) {
+        return {
+          summary: t.toFixed(1),
+          isPass: t >= 5,
+          failedSkills: t < 5 ? ['Điểm < 5.0'] : [],
+        };
+      }
+    }
+
+    return { summary: '', isPass: false, failedSkills };
+  }
+
+  const t = parseFloat(grade.theory);
+  const p = parseFloat(grade.practice);
+  let summary = '';
+  let isPass = false;
+
+  if (sub.hasTheory && sub.hasPractice) {
+    if (!isNaN(t) && !isNaN(p)) {
+      const avg = (t + p) / 2;
+      summary = avg.toFixed(1);
+      isPass = t >= 5 && p >= 5;
+    } else if (!isNaN(t) && app !== undefined) {
+      summary = t.toFixed(1);
+      isPass = t >= 5 && Boolean(app.practicePass);
+    }
+  } else if (sub.hasTheory) {
+    if (!isNaN(t)) {
+      summary = t.toFixed(1);
+      isPass = t >= 5;
+    }
+  } else if (sub.hasPractice) {
+    if (!isNaN(p)) {
+      summary = p.toFixed(1);
+      isPass = p >= 5;
+    } else if (app !== undefined) {
+      summary = app.practicePass ? 'Đạt' : 'K.Đạt';
+      isPass = Boolean(app.practicePass);
+    }
+  }
+
+  return { summary, isPass, failedSkills: [] };
 }
 
 export default function NhapDiem() {
@@ -71,12 +178,13 @@ export default function NhapDiem() {
   // Approvals: subKey -> studentCode -> { practicePass, theoryApproved }
   const [approvals, setApprovals] = useState<Record<string, Record<string, any>>>({});
 
-  // Grades: subKey -> studentCode -> { theory, practice }
+  // Grades: subKey -> studentCode -> GradeData
   const [inputGrades, setInputGrades] = useState<Record<string, Record<string, GradeData>>>({});
   const [currentGradeDocId, setCurrentGradeDocId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [batchLT, setBatchLT] = useState<string>('');
   const [batchTH, setBatchTH] = useState<string>('');
+  const [batchSkillTarget, setBatchSkillTarget] = useState<'all4' | 'listening' | 'speaking' | 'reading' | 'writing'>('all4');
 
   useEffect(() => {
     loadDecisionsAndSubjects();
@@ -98,6 +206,7 @@ export default function NhapDiem() {
         strapiId: s.strapiId || s.id,
         code: s.code,
         name: s.name,
+        notes: s.notes || '',
         hasTheory: s.has_theory !== false,
         hasPractice: s.has_practice === true,
       }));
@@ -159,6 +268,7 @@ export default function NhapDiem() {
             strapiId: s.strapiId || s.id,
             code: s.code,
             name: s.name,
+            notes: s.notes || '',
             hasTheory: s.has_theory !== false,
             hasPractice: s.has_practice === true,
           }));
@@ -254,21 +364,41 @@ export default function NhapDiem() {
     }
   };
 
-  const handleGradeChange = (studentCode: string, type: 'theory' | 'practice', value: string) => {
+  const syncFourSkillsTheory = (g: GradeData): GradeData => {
+    const l = parseFloat(g.listening ?? '');
+    const sp = parseFloat(g.speaking ?? '');
+    const r = parseFloat(g.reading ?? '');
+    const w = parseFloat(g.writing ?? '');
+    if (!isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w)) {
+      return {
+        ...g,
+        theory: ((l + sp + r + w) / 4).toFixed(1),
+      };
+    }
+    return g;
+  };
+
+  const handleGradeChange = (studentCode: string, type: GradeField, value: string) => {
     if (!selectedSubjectId) return;
     const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
     const subKey = String(curSub?.strapiId || selectedSubjectId);
     const curSubGrades = inputGrades[subKey] || {};
-    const studentGrade = curSubGrades[studentCode] || { theory: '', practice: '' };
+    const studentGrade: GradeData = {
+      theory: '',
+      practice: '',
+      ...(curSubGrades[studentCode] || {}),
+      [type]: value,
+    };
+
+    const nextStudentGrade = isFourSkillsSubject(curSub)
+      ? syncFourSkillsTheory(studentGrade)
+      : studentGrade;
 
     setInputGrades({
       ...inputGrades,
       [subKey]: {
         ...curSubGrades,
-        [studentCode]: {
-          ...studentGrade,
-          [type]: value,
-        },
+        [studentCode]: nextStudentGrade,
       },
     });
   };
@@ -310,22 +440,53 @@ export default function NhapDiem() {
 
   const handleBatchApplyLT = () => {
     const val = parseFloat(batchLT);
-    if (isNaN(val) || val < 0 || val > 10) { message.warning('Nhập điểm LT hợp lệ (0-10)'); return; }
+    if (isNaN(val) || val < 0 || val > 10) {
+      message.warning('Nhập điểm hợp lệ (0-10)');
+      return;
+    }
     if (!selectedSubjectId) return;
     const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
     const subKey = String(curSub?.strapiId || selectedSubjectId);
     const curSubGrades = { ...(inputGrades[subKey] || {}) };
+    const isFour = isFourSkillsSubject(curSub);
+
     decisionStudents.forEach((s) => {
       const current = curSubGrades[s.studentCode] || { theory: '', practice: '' };
-      curSubGrades[s.studentCode] = { ...current, theory: String(val) };
+      if (isFour) {
+        let updated: GradeData = { ...current };
+        if (batchSkillTarget === 'all4') {
+          updated = {
+            ...updated,
+            listening: String(val),
+            speaking: String(val),
+            reading: String(val),
+            writing: String(val),
+          };
+        } else {
+          updated = {
+            ...updated,
+            [batchSkillTarget]: String(val),
+          };
+        }
+        curSubGrades[s.studentCode] = syncFourSkillsTheory(updated);
+      } else {
+        curSubGrades[s.studentCode] = { ...current, theory: String(val) };
+      }
     });
     setInputGrades({ ...inputGrades, [subKey]: curSubGrades });
-    message.success(`Đã áp dụng điểm LT ${val} cho tất cả học viên`);
+    message.success(
+      isFour
+        ? `Đã áp dụng điểm ${val} cho tất cả học viên`
+        : `Đã áp dụng điểm LT ${val} cho tất cả học viên`,
+    );
   };
 
   const handleBatchApplyTH = () => {
     const val = parseFloat(batchTH);
-    if (isNaN(val) || val < 0 || val > 10) { message.warning('Nhập điểm TH hợp lệ (0-10)'); return; }
+    if (isNaN(val) || val < 0 || val > 10) {
+      message.warning('Nhập điểm TH hợp lệ (0-10)');
+      return;
+    }
     if (!selectedSubjectId) return;
     const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
     const subKey = String(curSub?.strapiId || selectedSubjectId);
@@ -344,15 +505,33 @@ export default function NhapDiem() {
     const subKey = String(curSub?.strapiId || selectedSubjectId);
     const subApprs = approvals[subKey] || {};
     const curSubGrades = { ...(inputGrades[subKey] || {}) };
+    const isFour = isFourSkillsSubject(curSub);
 
     decisionStudents.forEach((s) => {
-      const app = subApprs[s.studentCode] || { practicePass: !curSub?.hasPractice, theoryApproved: true };
+      const app = subApprs[s.studentCode] || {
+        practicePass: !curSub?.hasPractice,
+        theoryApproved: true,
+      };
       const current = curSubGrades[s.studentCode] || { theory: '', practice: '' };
 
-      curSubGrades[s.studentCode] = {
-        theory: curSub?.hasTheory && app.theoryApproved ? String(score) : current.theory,
-        practice: curSub?.hasPractice && app.practicePass ? String(score) : current.practice,
-      };
+      if (isFour) {
+        if (app.theoryApproved) {
+          curSubGrades[s.studentCode] = {
+            ...current,
+            listening: String(score),
+            speaking: String(score),
+            reading: String(score),
+            writing: String(score),
+            theory: String(score.toFixed(1)),
+          };
+        }
+      } else {
+        curSubGrades[s.studentCode] = {
+          ...current,
+          theory: curSub?.hasTheory && app.theoryApproved ? String(score) : current.theory,
+          practice: curSub?.hasPractice && app.practicePass ? String(score) : current.practice,
+        };
+      }
     });
 
     setInputGrades({
@@ -362,25 +541,44 @@ export default function NhapDiem() {
     message.success(`Đã điền nhanh điểm ${score} cho các học viên đủ điều kiện!`);
   };
 
+  const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
+  const subKey = String(curSub?.strapiId || selectedSubjectId);
+  const curSubGrades = inputGrades[subKey] || {};
+  const curSubApprovals = approvals[subKey] || {};
+  const isFourSkills = isFourSkillsSubject(curSub);
+
   const handleExportExcel = async () => {
     if (!selectedDecision || !curSub) return;
-    const subKey = String(curSub?.strapiId || selectedSubjectId);
-    const curSubGrades = inputGrades[subKey] || {};
 
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Bảng điểm');
 
-    ws.columns = [
-      { header: 'STT', key: 'stt', width: 5 },
-      { header: 'Mã HV', key: 'studentCode', width: 15 },
-      { header: 'Họ và tên', key: 'fullName', width: 25 },
-      { header: 'Ngày sinh', key: 'dob', width: 12 },
-      { header: 'Lý thuyết', key: 'theory', width: 12 },
-      { header: 'Thực hành', key: 'practice', width: 12 },
-      { header: 'Tổng kết', key: 'summary', width: 10 },
-      { header: 'Kết quả', key: 'result', width: 10 },
-    ];
+    if (isFourSkills) {
+      ws.columns = [
+        { header: 'STT', key: 'stt', width: 6 },
+        { header: 'Mã HV', key: 'studentCode', width: 16 },
+        { header: 'Họ và tên', key: 'fullName', width: 26 },
+        { header: 'Ngày sinh', key: 'dob', width: 13 },
+        { header: 'Nghe', key: 'listening', width: 10 },
+        { header: 'Nói', key: 'speaking', width: 10 },
+        { header: 'Đọc', key: 'reading', width: 10 },
+        { header: 'Viết', key: 'writing', width: 10 },
+        { header: 'Tổng kết', key: 'summary', width: 11 },
+        { header: 'Kết quả', key: 'result', width: 13 },
+      ];
+    } else {
+      ws.columns = [
+        { header: 'STT', key: 'stt', width: 5 },
+        { header: 'Mã HV', key: 'studentCode', width: 15 },
+        { header: 'Họ và tên', key: 'fullName', width: 25 },
+        { header: 'Ngày sinh', key: 'dob', width: 12 },
+        { header: 'Lý thuyết', key: 'theory', width: 12 },
+        { header: 'Thực hành', key: 'practice', width: 12 },
+        { header: 'Tổng kết', key: 'summary', width: 10 },
+        { header: 'Kết quả', key: 'result', width: 10 },
+      ];
+    }
 
     const headerRow = ws.getRow(1);
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -389,34 +587,37 @@ export default function NhapDiem() {
 
     decisionStudents.forEach((s, idx) => {
       const g = curSubGrades[s.studentCode] || { theory: '', practice: '' };
-      const t = parseFloat(g.theory);
-      const p = parseFloat(g.practice);
+      const app = curSubApprovals[s.studentCode] || {
+        practicePass: !curSub?.hasPractice,
+        theoryApproved: true,
+      };
+      const { summary, isPass } = evaluateSubjectGrade(curSub, g, app);
 
-      let summary = '';
-      let isPass = false;
-      if (curSub.hasTheory && curSub.hasPractice) {
-        if (!isNaN(t) && !isNaN(p)) {
-          const avg = (t + p) / 2;
-          summary = avg.toFixed(1);
-          isPass = t >= 5 && p >= 5;
-        }
-      } else if (curSub.hasTheory) {
-        if (!isNaN(t)) { summary = t.toFixed(1); isPass = t >= 5; }
-      } else if (curSub.hasPractice) {
-        if (!isNaN(p)) { summary = p.toFixed(1); isPass = p >= 5; }
-      }
+      const rowData = isFourSkills
+        ? {
+            stt: idx + 1,
+            studentCode: s.studentCode,
+            fullName: s.fullName,
+            dob: fmtNgay(s.dob),
+            listening: g.listening ?? '',
+            speaking: g.speaking ?? '',
+            reading: g.reading ?? '',
+            writing: g.writing ?? '',
+            summary,
+            result: summary ? (isPass ? 'Đạt' : 'Chưa đạt') : '',
+          }
+        : {
+            stt: idx + 1,
+            studentCode: s.studentCode,
+            fullName: s.fullName,
+            dob: fmtNgay(s.dob),
+            theory: g.theory || '',
+            practice: g.practice || '',
+            summary,
+            result: summary ? (isPass ? 'Đạt' : 'Chưa đạt') : '',
+          };
 
-      const row = ws.addRow({
-        stt: idx + 1,
-        studentCode: s.studentCode,
-        fullName: s.fullName,
-        dob: fmtNgay(s.dob),
-        theory: g.theory || '',
-        practice: g.practice || '',
-        summary,
-        result: summary ? (isPass ? 'Đạt' : 'Chưa đạt') : '',
-      });
-
+      const row = ws.addRow(rowData);
       if (idx % 2 === 1) {
         row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
       }
@@ -425,8 +626,10 @@ export default function NhapDiem() {
     ws.eachRow((row) => {
       row.eachCell((cell) => {
         cell.border = {
-          top: { style: 'thin' }, left: { style: 'thin' },
-          bottom: { style: 'thin' }, right: { style: 'thin' },
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' },
         };
       });
     });
@@ -447,38 +650,33 @@ export default function NhapDiem() {
       message.error('Vui lòng cho phép Pop-up trên trình duyệt để in.');
       return;
     }
-    const subKey = String(curSub?.strapiId || selectedSubjectId);
-    const curSubGrades = inputGrades[subKey] || {};
-    const curSubAppr = approvals[subKey] || {};
 
     const rowsHtml = decisionStudents
       .map((s, idx) => {
         const g = curSubGrades[s.studentCode] || { theory: '', practice: '' };
-        const app = curSubAppr[s.studentCode] || { practicePass: !curSub?.hasPractice, theoryApproved: true };
-        const t = parseFloat(g.theory);
-        const p = parseFloat(g.practice);
-        let summary = '';
-        let isPass = false;
-        if (curSub.hasTheory && curSub.hasPractice) {
-          if (!isNaN(t)) {
-            const pPass = !isNaN(p) ? p >= 5 : app.practicePass;
-            summary = !isNaN(p) ? ((t + p) / 2).toFixed(1) : t.toFixed(1);
-            isPass = t >= 5 && pPass;
-          }
-        } else if (curSub.hasTheory) {
-          if (!isNaN(t)) {
-            summary = t.toFixed(1);
-            isPass = t >= 5;
-          }
-        } else if (curSub.hasPractice) {
-          if (!isNaN(p)) {
-            summary = p.toFixed(1);
-            isPass = p >= 5;
-          } else {
-            summary = app.practicePass ? 'Đạt' : 'K.Đạt';
-            isPass = !!app.practicePass;
-          }
+        const app = curSubApprovals[s.studentCode] || {
+          practicePass: !curSub?.hasPractice,
+          theoryApproved: true,
+        };
+        const { summary, isPass } = evaluateSubjectGrade(curSub, g, app);
+
+        if (isFourSkills) {
+          return `
+            <tr>
+              <td style="text-align:center;">${idx + 1}</td>
+              <td style="text-align:center;">${s.studentCode}</td>
+              <td><b>${s.fullName}</b></td>
+              <td style="text-align:center;">${fmtNgay(s.dob)}</td>
+              <td style="text-align:center;">${g.listening ?? ''}</td>
+              <td style="text-align:center;">${g.speaking ?? ''}</td>
+              <td style="text-align:center;">${g.reading ?? ''}</td>
+              <td style="text-align:center;">${g.writing ?? ''}</td>
+              <td style="text-align:center;"><b>${summary}</b></td>
+              <td style="text-align:center;">${summary ? (isPass ? 'Đạt' : 'Chưa đạt') : ''}</td>
+            </tr>
+          `;
         }
+
         return `
           <tr>
             <td style="text-align:center;">${idx + 1}</td>
@@ -494,6 +692,34 @@ export default function NhapDiem() {
       })
       .join('');
 
+    const tableHeaderHtml = isFourSkills
+      ? `
+        <tr>
+          <th style="width:40px;">STT</th>
+          <th style="width:105px;">Mã HV</th>
+          <th>Họ và tên</th>
+          <th style="width:90px;">Ngày sinh</th>
+          <th style="width:58px;">Nghe</th>
+          <th style="width:58px;">Nói</th>
+          <th style="width:58px;">Đọc</th>
+          <th style="width:58px;">Viết</th>
+          <th style="width:68px;">Tổng kết</th>
+          <th style="width:82px;">Kết quả</th>
+        </tr>
+      `
+      : `
+        <tr>
+          <th style="width:45px;">STT</th>
+          <th style="width:110px;">Mã HV</th>
+          <th>Họ và tên</th>
+          <th style="width:95px;">Ngày sinh</th>
+          <th style="width:80px;">Lý thuyết</th>
+          <th style="width:80px;">Thực hành</th>
+          <th style="width:80px;">Tổng kết</th>
+          <th style="width:90px;">Kết quả</th>
+        </tr>
+      `;
+
     const html = `
       <html>
       <head>
@@ -503,7 +729,7 @@ export default function NhapDiem() {
           body { font-family: 'Times New Roman', serif; font-size: 12pt; color: #000; }
           h2, h3 { text-align: center; margin: 4px 0; }
           table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 11pt; }
-          th, td { border: 1px solid #000; padding: 6px 8px; }
+          th, td { border: 1px solid #000; padding: 6px 6px; }
           th { background: #f2f2f2; text-align: center; font-weight: bold; }
         </style>
       </head>
@@ -512,18 +738,7 @@ export default function NhapDiem() {
         <h3>Lớp: ${selectedDecision.className} - Khóa: ${selectedDecision.trainingCourse || ''}</h3>
         <div style="text-align:center; margin-bottom:10px;">Môn học: <b>${curSub.name} (${curSub.code})</b></div>
         <table>
-          <thead>
-            <tr>
-              <th style="width:45px;">STT</th>
-              <th style="width:110px;">Mã HV</th>
-              <th>Họ và tên</th>
-              <th style="width:95px;">Ngày sinh</th>
-              <th style="width:80px;">Lý thuyết</th>
-              <th style="width:80px;">Thực hành</th>
-              <th style="width:80px;">Tổng kết</th>
-              <th style="width:90px;">Kết quả</th>
-            </tr>
-          </thead>
+          <thead>${tableHeaderHtml}</thead>
           <tbody>${rowsHtml}</tbody>
         </table>
         <script>window.onload = function() { setTimeout(() => { window.print(); }, 400); };</script>
@@ -533,11 +748,6 @@ export default function NhapDiem() {
     printWindow.document.write(html);
     printWindow.document.close();
   };
-
-  const curSub = decisionSubjects.find((s) => s.id === selectedSubjectId);
-  const subKey = String(curSub?.strapiId || selectedSubjectId);
-  const curSubGrades = inputGrades[subKey] || {};
-  const curSubApprovals = approvals[subKey] || {};
 
   const classFilterOptions = Array.from(
     new Map(
@@ -581,7 +791,7 @@ export default function NhapDiem() {
                     Nhập điểm thi kết thúc môn
                   </Title>
                   <Text type="secondary">
-                    Nhập điểm thi lý thuyết & thực hành, tính điểm tổng kết và kết quả đạt môn
+                    Nhập điểm thi lý thuyết, thực hành hoặc 4 kỹ năng (Nghe, Nói, Đọc, Viết), tính điểm tổng kết và kết quả đạt môn
                   </Text>
                 </div>
               </Space>
@@ -679,6 +889,13 @@ export default function NhapDiem() {
     );
   }
 
+  const fourSkillDefs: { key: 'listening' | 'speaking' | 'reading' | 'writing'; label: string }[] = [
+    { key: 'listening', label: 'Nghe (0-10)' },
+    { key: 'speaking', label: 'Nói (0-10)' },
+    { key: 'reading', label: 'Đọc (0-10)' },
+    { key: 'writing', label: 'Viết (0-10)' },
+  ];
+
   return (
     <div style={{ padding: '0 0 24px 0' }}>
       <Card style={{ marginBottom: 16 }}>
@@ -729,7 +946,8 @@ export default function NhapDiem() {
               <Select
                 value={selectedSubjectId}
                 onChange={(val) => setSelectedSubjectId(val)}
-                style={{ width: 280 }}
+                popupMatchSelectWidth={false}
+                style={{ width: 320, maxWidth: '100%' }}
               >
                 {decisionSubjects.map((s) => (
                   <Select.Option key={s.id} value={s.id}>
@@ -737,6 +955,11 @@ export default function NhapDiem() {
                   </Select.Option>
                 ))}
               </Select>
+              {isFourSkills && (
+                <Tag color="purple">
+                  Chấm 4 kỹ năng: Nghe • Nói • Đọc • Viết (Đạt khi cả 4 kỹ năng ≥ 5.0)
+                </Tag>
+              )}
             </Space>
           </Col>
           <Col xs={24} md={12} style={{ textAlign: 'right' }}>
@@ -745,22 +968,52 @@ export default function NhapDiem() {
               <Button size="small" onClick={() => handleQuickFillScores(7)}>7.0</Button>
               <Button size="small" onClick={() => handleQuickFillScores(8)}>8.0</Button>
               <Button size="small" onClick={() => handleQuickFillScores(9)}>9.0</Button>
-              <Input
-                size="small"
-                placeholder="LT"
-                style={{ width: 60 }}
-                value={batchLT}
-                onChange={(e) => setBatchLT(e.target.value)}
-              />
-              <Button size="small" onClick={handleBatchApplyLT}>Áp dụng LT</Button>
-              <Input
-                size="small"
-                placeholder="TH"
-                style={{ width: 60 }}
-                value={batchTH}
-                onChange={(e) => setBatchTH(e.target.value)}
-              />
-              <Button size="small" onClick={handleBatchApplyTH}>Áp dụng TH</Button>
+              {isFourSkills ? (
+                <>
+                  <Select
+                    size="small"
+                    value={batchSkillTarget}
+                    onChange={(v) => setBatchSkillTarget(v)}
+                    style={{ width: 125 }}
+                    options={[
+                      { value: 'all4', label: 'Cả 4 kỹ năng' },
+                      { value: 'listening', label: 'Điểm Nghe' },
+                      { value: 'speaking', label: 'Điểm Nói' },
+                      { value: 'reading', label: 'Điểm Đọc' },
+                      { value: 'writing', label: 'Điểm Viết' },
+                    ]}
+                  />
+                  <Input
+                    size="small"
+                    placeholder="Điểm"
+                    style={{ width: 65 }}
+                    value={batchLT}
+                    onChange={(e) => setBatchLT(e.target.value)}
+                  />
+                  <Button size="small" type="primary" ghost onClick={handleBatchApplyLT}>
+                    Áp dụng
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Input
+                    size="small"
+                    placeholder="LT"
+                    style={{ width: 60 }}
+                    value={batchLT}
+                    onChange={(e) => setBatchLT(e.target.value)}
+                  />
+                  <Button size="small" onClick={handleBatchApplyLT}>Áp dụng LT</Button>
+                  <Input
+                    size="small"
+                    placeholder="TH"
+                    style={{ width: 60 }}
+                    value={batchTH}
+                    onChange={(e) => setBatchTH(e.target.value)}
+                  />
+                  <Button size="small" onClick={handleBatchApplyTH}>Áp dụng TH</Button>
+                </>
+              )}
             </Space>
           </Col>
         </Row>
@@ -795,7 +1048,7 @@ export default function NhapDiem() {
             },
             {
               title: 'Điều kiện dự thi',
-              width: 150,
+              width: 140,
               align: 'center',
               render: (_, record) => {
                 const app = curSubApprovals[record.studentCode] || {
@@ -810,111 +1063,145 @@ export default function NhapDiem() {
                 );
               },
             },
-            ...(curSub?.hasTheory
-              ? [
-                  {
-                    title: 'Lý thuyết (0-10)',
-                    width: 150,
-                    align: 'center' as const,
-                    render: (_: any, record: StudentItem) => {
-                      const app = curSubApprovals[record.studentCode] || {
-                        practicePass: !curSub?.hasPractice,
-                        theoryApproved: false,
-                      };
-                      const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
-                      const disabled = !app.theoryApproved;
-                      return (
-                        <InputNumber
-                          min={0}
-                          max={10}
-                          step={0.5}
-                          precision={1}
-                          disabled={disabled}
-                          placeholder={disabled ? 'Khóa' : 'Nhập điểm'}
-                          value={g.theory ? parseFloat(g.theory) : null}
-                          onChange={(val) =>
-                            handleGradeChange(record.studentCode, 'theory', val !== null ? String(val) : '')
-                          }
-                          style={{ width: 110, textAlign: 'center' }}
-                        />
-                      );
-                    },
+            ...(isFourSkills
+              ? fourSkillDefs.map((sk) => ({
+                  title: sk.label,
+                  width: 115,
+                  align: 'center' as const,
+                  render: (_: any, record: StudentItem) => {
+                    const app = curSubApprovals[record.studentCode] || {
+                      practicePass: !curSub?.hasPractice,
+                      theoryApproved: false,
+                    };
+                    const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
+                    const disabled = !app.theoryApproved;
+                    const rawVal = g[sk.key];
+                    const numVal = rawVal !== undefined && rawVal !== '' ? parseFloat(rawVal) : null;
+                    const isBelowPass = numVal !== null && !isNaN(numVal) && numVal < 5;
+
+                    return (
+                      <InputNumber
+                        min={0}
+                        max={10}
+                        step={0.5}
+                        precision={1}
+                        disabled={disabled}
+                        status={isBelowPass ? 'error' : undefined}
+                        placeholder={disabled ? 'Khóa' : '0-10'}
+                        value={numVal !== null && !isNaN(numVal) ? numVal : null}
+                        onChange={(val) =>
+                          handleGradeChange(
+                            record.studentCode,
+                            sk.key,
+                            val !== null && val !== undefined ? String(val) : '',
+                          )
+                        }
+                        style={{ width: 92, textAlign: 'center' }}
+                      />
+                    );
                   },
-                ]
-              : []),
-            ...(curSub?.hasPractice
-              ? [
-                  {
-                    title: 'Thực hành',
-                    width: 190,
-                    align: 'center' as const,
-                    render: (_: any, record: StudentItem) => {
-                      const app = curSubApprovals[record.studentCode];
-                      const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
-                      return (
-                        <Space size={6}>
-                          {app && (
-                            <Tag color={app.practicePass ? 'success' : 'error'} style={{ margin: 0 }}>
-                              {app.practicePass ? 'Đạt' : 'K.Đạt'}
-                            </Tag>
-                          )}
-                          <InputNumber
-                            min={0}
-                            max={10}
-                            step={0.5}
-                            precision={1}
-                            placeholder="Điểm"
-                            value={g.practice ? parseFloat(g.practice) : null}
-                            onChange={(val) =>
-                              handleGradeChange(record.studentCode, 'practice', val !== null ? String(val) : '')
-                            }
-                            style={{ width: 85, textAlign: 'center' }}
-                          />
-                        </Space>
-                      );
-                    },
-                  },
-                ]
-              : []),
+                }))
+              : [
+                  ...(curSub?.hasTheory
+                    ? [
+                        {
+                          title: 'Lý thuyết (0-10)',
+                          width: 150,
+                          align: 'center' as const,
+                          render: (_: any, record: StudentItem) => {
+                            const app = curSubApprovals[record.studentCode] || {
+                              practicePass: !curSub?.hasPractice,
+                              theoryApproved: false,
+                            };
+                            const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
+                            const disabled = !app.theoryApproved;
+                            return (
+                              <InputNumber
+                                min={0}
+                                max={10}
+                                step={0.5}
+                                precision={1}
+                                disabled={disabled}
+                                placeholder={disabled ? 'Khóa' : 'Nhập điểm'}
+                                value={g.theory ? parseFloat(g.theory) : null}
+                                onChange={(val) =>
+                                  handleGradeChange(record.studentCode, 'theory', val !== null ? String(val) : '')
+                                }
+                                style={{ width: 110, textAlign: 'center' }}
+                              />
+                            );
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(curSub?.hasPractice
+                    ? [
+                        {
+                          title: 'Thực hành',
+                          width: 190,
+                          align: 'center' as const,
+                          render: (_: any, record: StudentItem) => {
+                            const app = curSubApprovals[record.studentCode];
+                            const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
+                            return (
+                              <Space size={6}>
+                                {app && (
+                                  <Tag color={app.practicePass ? 'success' : 'error'} style={{ margin: 0 }}>
+                                    {app.practicePass ? 'Đạt' : 'K.Đạt'}
+                                  </Tag>
+                                )}
+                                <InputNumber
+                                  min={0}
+                                  max={10}
+                                  step={0.5}
+                                  precision={1}
+                                  placeholder="Điểm"
+                                  value={g.practice ? parseFloat(g.practice) : null}
+                                  onChange={(val) =>
+                                    handleGradeChange(record.studentCode, 'practice', val !== null ? String(val) : '')
+                                  }
+                                  style={{ width: 85, textAlign: 'center' }}
+                                />
+                              </Space>
+                            );
+                          },
+                        },
+                      ]
+                    : []),
+                ]),
             {
               title: 'Tổng kết môn',
-              width: 140,
+              width: 150,
               align: 'center',
               render: (_, record) => {
                 const g = curSubGrades[record.studentCode] || { theory: '', practice: '' };
-                const t = parseFloat(g.theory);
-                const p = parseFloat(g.practice);
+                const app = curSubApprovals[record.studentCode];
+                const { summary, isPass, failedSkills } = evaluateSubjectGrade(curSub, g, app);
 
-                let summary = '';
-                let isPass = false;
-                if (curSub?.hasTheory && curSub?.hasPractice) {
-                  if (!isNaN(t) && !isNaN(p)) {
-                    const avg = (t + p) / 2;
-                    summary = avg.toFixed(1);
-                    isPass = t >= 5 && p >= 5;
+                if (!summary) {
+                  if (isFourSkills && failedSkills.length > 0) {
+                    return (
+                      <Tag color="error">
+                        {failedSkills.join(', ')} &lt; 5.0
+                      </Tag>
+                    );
                   }
-                } else if (curSub?.hasTheory) {
-                  if (!isNaN(t)) {
-                    summary = t.toFixed(1);
-                    isPass = t >= 5;
-                  }
-                } else if (curSub?.hasPractice) {
-                  if (!isNaN(p)) {
-                    summary = p.toFixed(1);
-                    isPass = p >= 5;
-                  }
+                  return <Text type="secondary">---</Text>;
                 }
-
-                if (!summary) return <Text type="secondary">---</Text>;
 
                 return (
                   <Space direction="vertical" size={2}>
                     <Text strong style={{ fontSize: 15, color: isPass ? '#52c41a' : '#ff4d4f' }}>
                       {summary}
                     </Text>
-                    <Tag color={isPass ? 'success' : 'error'}>
+                    <Tag color={isPass ? 'success' : 'error'} style={{ margin: 0 }}>
                       {isPass ? 'ĐẠT' : 'CHƯA ĐẠT'}
                     </Tag>
+                    {!isPass && failedSkills.length > 0 && (
+                      <span style={{ fontSize: 11, color: '#ff4d4f' }}>
+                        ({failedSkills.join(', ')} &lt; 5.0)
+                      </span>
+                    )}
                   </Space>
                 );
               },

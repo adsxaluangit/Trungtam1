@@ -2492,10 +2492,20 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
     const subjectGrades = gradeRecord?.grades || {};
 
     const subjectHeaders = subjectsList
-      .map(
-        (subj: any) =>
-          `<th style="border:1px solid black;padding:4px;text-align:center;font-size:9pt;">${subj.name}</th>`,
-      )
+      .map((subj: any) => {
+        const is4Skills = ['HLNV68', 'HLNV79', 'HLNV80', 'HLNV81', 'HLNV82', 'HLNV83'].includes(
+          String(subj.code || '').trim().toUpperCase(),
+        );
+        if (is4Skills) {
+          return ['Nghe', 'Nói', 'Đọc', 'Viết']
+            .map(
+              (sk) =>
+                `<th style="border:1px solid black;padding:4px;text-align:center;font-size:9pt;">${sk}</th>`,
+            )
+            .join('');
+        }
+        return `<th style="border:1px solid black;padding:4px;text-align:center;font-size:9pt;">${subj.name}</th>`;
+      })
       .join('');
 
     const sortedStudents = sortStudentsByFirstName(tempStudents);
@@ -2514,6 +2524,26 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
               subjectGrades[subKey2]?.[s.studentCode] ||
               subjectGrades[subKey1]?.[s.cardNumber] ||
               subjectGrades[subKey2]?.[s.cardNumber];
+            const is4Skills = ['HLNV68', 'HLNV79', 'HLNV80', 'HLNV81', 'HLNV82', 'HLNV83'].includes(
+              String(subj.code || '').trim().toUpperCase(),
+            );
+            if (is4Skills) {
+              const gObj = typeof gradeObj === 'object' && gradeObj ? gradeObj : {};
+              const hasAny4 =
+                gObj.listening !== undefined ||
+                gObj.speaking !== undefined ||
+                gObj.reading !== undefined ||
+                gObj.writing !== undefined;
+              const vals = hasAny4
+                ? [gObj.listening ?? '', gObj.speaking ?? '', gObj.reading ?? '', gObj.writing ?? '']
+                : [gObj.theory ?? '', '', '', ''];
+              return vals
+                .map(
+                  (v) =>
+                    `<td style="border:1px solid black;padding:4px;text-align:center;">${v}</td>`,
+                )
+                .join('');
+            }
             let displayGrade = '';
             if (gradeObj) {
               if (typeof gradeObj === 'object') {
@@ -4187,8 +4217,8 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                 { title: 'STT', width: 50, align: 'center', render: (_, __, i) => i + 1 },
                 { title: 'Môn học', dataIndex: 'name', render: (v: string) => <b>{v}</b> },
                 {
-                  title: 'Lý thuyết',
-                  width: 110,
+                  title: 'Điểm Lý thuyết / 4 Kỹ năng',
+                  width: 240,
                   align: 'center',
                   render: (_: any, subj: any) => {
                     const k1 = String(subj.strapiId || subj.id);
@@ -4198,6 +4228,42 @@ export default function QuyetDinh({ mode }: QuyetDinhProps) {
                       subjectGrades[k2]?.[viewingGradeStudent.studentCode] ||
                       subjectGrades[k1]?.[viewingGradeStudent.cardNumber] ||
                       subjectGrades[k2]?.[viewingGradeStudent.cardNumber];
+                    const is4Skills = [
+                      'HLNV68',
+                      'HLNV79',
+                      'HLNV80',
+                      'HLNV81',
+                      'HLNV82',
+                      'HLNV83',
+                    ].includes(String(subj.code || '').trim().toUpperCase());
+                    if (is4Skills && g && typeof g === 'object') {
+                      const l = parseFloat(g.listening ?? '');
+                      const sp = parseFloat(g.speaking ?? '');
+                      const r = parseFloat(g.reading ?? '');
+                      const w = parseFloat(g.writing ?? '');
+                      const hasAny4 = !isNaN(l) || !isNaN(sp) || !isNaN(r) || !isNaN(w);
+                      if (hasAny4) {
+                        const hasAll4 = !isNaN(l) && !isNaN(sp) && !isNaN(r) && !isNaN(w);
+                        const avg = hasAll4 ? ((l + sp + r + w) / 4).toFixed(1) : null;
+                        const isPass = hasAll4 && l >= 5 && sp >= 5 && r >= 5 && w >= 5;
+                        return (
+                          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                            <div>
+                              Nghe: <b>{g.listening || '-'}</b> | Nói: <b>{g.speaking || '-'}</b> | Đọc:{' '}
+                              <b>{g.reading || '-'}</b> | Viết: <b>{g.writing || '-'}</b>
+                            </div>
+                            {avg && (
+                              <div>
+                                TB: <b>{avg}</b>{' '}
+                                <Tag color={isPass ? 'success' : 'error'} style={{ marginLeft: 4 }}>
+                                  {isPass ? 'Đạt' : 'Chưa đạt'}
+                                </Tag>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                    }
                     const val = typeof g === 'object' ? g?.theory : g;
                     return val !== undefined && val !== '' ? <b>{val}</b> : '---';
                   },
